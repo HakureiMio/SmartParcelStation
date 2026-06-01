@@ -1,16 +1,17 @@
 # SmartParcelStation
 
-SmartParcelStation（SPS）是一个面向小型快递站场景的智能包裹管理与辅助取件系统。当前项目处于局域网验证阶段，重点验证“服务端 + 本地网关”的核心链路：服务端负责业务数据、任务下发与同步管理，本地网关负责本地离线缓存、门禁/NFC 触发、标签唤醒任务生成，以及与服务端进行 HTTP/MQTT 通信。
+SmartParcelStation（SPS）是一个面向小型快递站场景的智能包裹管理与辅助取件系统。当前项目处于局域网验证阶段，重点验证“服务端 + 本地网关 + 智能夹具节点”的核心链路：服务端负责业务数据、任务下发与同步管理，本地网关负责本地离线缓存、门禁/NFC 触发、BLE 标签通信与事件回传，智能夹具节点负责包裹侧的亮灯、蜂鸣、取下检测、电池检测和低功耗运行。
 
-本仓库采用单仓库多目录结构，便于在早期阶段统一维护服务端和网关之间的接口约定，降低联调成本。
+本仓库采用单仓库多目录结构，便于在早期阶段统一维护服务端、网关和固件之间的接口约定，降低联调成本。
 
 ## 1. 项目构成
 
 ```text
 SmartParcelStation/
-├─ smartparcel-server/      # 服务端项目
-├─ smartparcel-gateway/     # 本地网关项目
-└─ README.md                # 项目总说明
+├─ smartparcel-server/        # 服务端项目：FastAPI + MySQL + EMQX
+├─ smartparcel-gateway/       # 本地网关项目：SQLite + HTTP/MQTT + NFC/BLE 接入
+├─ clip-node-nrf52810/        # 智能夹具节点固件：nRF52810 + Zephyr
+└─ README.md                  # 项目总说明
 ```
 
 ### 1.1 smartparcel-server
@@ -34,11 +35,11 @@ SmartParcelStation/
 - `X-Dev-User-Id`
 - `X-Dev-Role`
 
-同时预留了网关签名校验框架，用于验证网关侧请求来源。
+同时预留网关签名校验框架，用于验证网关侧请求来源。
 
 ### 1.2 smartparcel-gateway
 
-`smartparcel-gateway` 是 SPS 的本地边缘网关项目，运行在 Linux 设备、开发电脑或后续树莓派/小型主机上。它负责连接本地设备与远程服务端，在局域网验证阶段提供 mock NFC / mock BLE 流程。
+`smartparcel-gateway` 是 SPS 的本地边缘网关项目，运行在 Linux 设备、开发电脑或后续树莓派/小型主机上。它负责连接本地设备与远程服务端，在局域网验证阶段提供 mock NFC / mock BLE 流程，并为后续接入 PN532 与真实 BLE 标签做准备。
 
 主要能力：
 
@@ -49,7 +50,34 @@ SmartParcelStation/
 - heartbeat 心跳上报
 - sync pull / sync push 数据同步
 - mock NFC 刷卡触发 TAG_WAKE
+- mock BLE 模拟标签亮灯/蜂鸣
 - 预留 PN532 NFC 与 BLE 标签接口
+
+### 1.3 clip-node-nrf52810
+
+`clip-node-nrf52810` 是 SPS 的智能夹具节点固件工程，基于 nRF Connect SDK / Zephyr 与 nRF52810 实现。该目录对应快递包裹侧的低功耗标签/夹具节点，用于接收网关 BLE 指令并执行亮灯、蜂鸣、状态上报和取下检测。
+
+主要能力：
+
+- BLE 通信模块骨架
+- 夹具状态机：idle / bound / authorized / alerting / removed / confirmed / low_battery / exception
+- 轻量二进制协议解析与分发
+- 事件上报接口
+- RGB PWM 控制
+- 蜂鸣器模式控制
+- GPIO 取下检测与软件消抖
+- ADC 电池检测与电量等级
+- 低功耗行为约束
+
+构建方式示例：
+
+```bash
+cd clip-node-nrf52810
+west build -b clip_node_nrf52810 . -p
+west flash
+```
+
+当前固件仍处于骨架阶段，默认引脚留空，后续需要根据实际硬件原理图完善 `docs/hardware_pins.md`。
 
 ## 2. 系统实现方式
 
@@ -60,7 +88,11 @@ SmartParcelStation/
         ↑            ↓
    HTTP REST       MQTT Topic
         ↑            ↓
-本地网关 Python + SQLite + mock NFC/BLE
+本地网关 Python + SQLite + NFC/BLE
+        ↑            ↓
+  BLE GATT / Binary Frame
+        ↑            ↓
+nRF52810 智能夹具节点 + RGB + Buzzer + Battery + Low Power
 ```
 
 ### 2.1 服务端实现
@@ -95,7 +127,13 @@ SmartParcelStation/
 - `python -m gateway.main list-tags`
 - `python -m gateway.main list-tasks`
 
-### 2.3 通信方式
+### 2.3 夹具节点实现
+
+夹具节点固件不负责用户、包裹、数据库和云同步逻辑，只保留和硬件执行直接相关的最小功能。网关通过 BLE 向夹具节点发送轻量二进制命令，夹具节点根据命令进入告警、确认、低电量或异常等状态。
+
+该设计可以避免在 nRF52810 这类资源受限芯片上引入复杂 JSON 解析或业务数据库逻辑，同时减少隐私数据在包裹侧设备上的暴露。
+
+### 2.4 通信方式
 
 #### HTTP REST
 
@@ -120,6 +158,21 @@ Topic 约定：
 - 网关上报事件：`gateway/{gateway_code}/events`
 - 网关上报状态：`gateway/{gateway_code}/status`
 
+#### BLE / Binary Frame
+
+网关与智能夹具节点之间通过 BLE 通信。固件侧采用轻量二进制帧，不在夹具端解析复杂业务对象。
+
+典型命令包括：
+
+- 绑定标签
+- 唤醒标签
+- RGB 亮灯
+- 蜂鸣提醒
+- 停止提醒
+- 状态查询
+- 低电量上报
+- 取下事件上报
+
 ## 3. 业务流程设计
 
 ### 3.1 入库流程
@@ -134,6 +187,8 @@ Topic 约定：
 网关通过 sync-pull 拉取待同步数据
 ↓
 网关写入本地 SQLite
+↓
+后续可通过 BLE 将必要绑定状态同步给夹具节点
 ```
 
 ### 3.2 取件流程
@@ -149,7 +204,9 @@ Topic 约定：
 ↓
 网关创建 TAG_WAKE 任务
 ↓
-mock BLE 或后续真实 BLE 标签执行亮灯/蜂鸣
+网关通过 mock BLE 或真实 BLE 向夹具节点下发提醒命令
+↓
+夹具节点执行亮灯/蜂鸣
 ↓
 用户找到包裹并确认取件
 ↓
@@ -162,9 +219,16 @@ mock BLE 或后续真实 BLE 标签执行亮灯/蜂鸣
 
 ## 4. 局域网完整测试流程
 
-以下流程用于验证 SPS 当前阶段的最小闭环。
+当前测试分为两个阶段：
 
-### 4.1 启动服务端基础服务
+- 阶段 A：软件 mock 闭环，验证 `server + gateway + mock NFC + mock BLE`。
+- 阶段 B：固件接入闭环，验证 `server + gateway + NFC/mock NFC + nRF52810 clip node`。
+
+建议优先完成阶段 A，再接入阶段 B。这样可以先证明服务端与网关业务链路可运行，再逐步替换真实硬件。
+
+## 5. 阶段 A：软件 mock 闭环测试
+
+### 5.1 启动服务端基础服务
 
 进入服务端目录：
 
@@ -209,7 +273,7 @@ python -m alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload
 ```
 
-### 4.2 测试服务端健康检查
+### 5.2 测试服务端健康检查
 
 ```powershell
 Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:18000/api/v1/health"
@@ -217,7 +281,7 @@ Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:18000/api/v1/health"
 
 如果返回正常状态，说明服务端 API 已启动。
 
-### 4.3 创建站点
+### 5.3 创建站点
 
 ```powershell
 $headers = @{
@@ -239,7 +303,7 @@ Invoke-RestMethod -Method POST `
   -Body $body
 ```
 
-### 4.4 创建快递测试数据
+### 5.4 创建快递测试数据
 
 ```powershell
 $headers = @{
@@ -260,7 +324,7 @@ Invoke-RestMethod -Method POST `
   -Body $body
 ```
 
-### 4.5 启动本地网关
+### 5.5 启动本地网关
 
 新开一个终端，进入网关目录：
 
@@ -315,7 +379,7 @@ python -m gateway.main health
 python -m gateway.main heartbeat
 ```
 
-### 4.6 执行同步测试
+### 5.6 执行同步测试
 
 从服务端拉取数据：
 
@@ -337,7 +401,7 @@ python -m gateway.main list-tasks
 python -m gateway.main sync-push
 ```
 
-### 4.7 执行 mock NFC 取件测试
+### 5.7 执行 mock NFC 取件测试
 
 使用 mock NFC 模拟门禁刷卡：
 
@@ -371,9 +435,9 @@ python -m gateway.main mock-nfc CARD_UID
 python -m gateway.main sync-push
 ```
 
-如果服务端能够收到取件事件，说明局域网软件闭环验证通过。
+如果服务端能够收到取件事件，说明局域网软件 mock 闭环验证通过。
 
-### 4.8 启动网关常驻运行模式
+### 5.8 启动网关常驻运行模式
 
 ```powershell
 python -m gateway.main run
@@ -388,9 +452,104 @@ python -m gateway.main run
 - sync pull 定时拉取
 - sync push 定时推送
 
-## 5. 当前验证目标
+## 6. 阶段 B：nRF52810 固件接入测试
 
-当前阶段的目标不是直接上线，而是完成局域网最小闭环验证：
+阶段 B 用于在阶段 A 通过后，将 mock BLE 替换为真实 nRF52810 智能夹具节点。
+
+### 6.1 准备 nRF Connect SDK 环境
+
+推荐使用 Windows + VS Code：
+
+- Visual Studio Code
+- nRF Connect for VS Code Extension Pack
+- Nordic Toolchain Manager / nRF Connect SDK
+- C/C++ Extension
+- Cortex-Debug（可选）
+- J-Link 或兼容 SWD 调试器
+
+### 6.2 构建固件
+
+进入固件目录：
+
+```powershell
+cd clip-node-nrf52810
+```
+
+在 nRF Connect Toolchain 终端中执行：
+
+```bash
+west build -b clip_node_nrf52810 . -p
+```
+
+### 6.3 烧录固件
+
+通过 SWD 连接目标板：
+
+```text
+SWDIO  -> 模组 SWDIO
+SWDCLK -> 模组 SWDCLK
+VCC    -> 模组 VCC
+GND    -> 模组 GND
+RESET  -> 模组 RESET
+```
+
+烧录：
+
+```bash
+west flash
+```
+
+### 6.4 查看日志
+
+推荐使用 RTT：
+
+- VS Code nRF Connect 的 Serial/RTT Terminal
+- J-Link RTT Viewer
+
+固件默认开启 RTT 相关配置：
+
+```text
+CONFIG_USE_SEGGER_RTT=y
+CONFIG_LOG_BACKEND_RTT=y
+```
+
+### 6.5 替换 mock BLE
+
+当固件可正常启动并广播/连接后，逐步将网关侧 mock BLE 替换为真实 BLE 控制逻辑：
+
+```text
+mock BLE TAG_WAKE
+↓
+真实 BLE 扫描/连接
+↓
+发现 clip node GATT Service
+↓
+发送轻量二进制命令帧
+↓
+夹具节点执行亮灯/蜂鸣
+↓
+夹具节点上报状态/事件
+↓
+网关写入 pickup event / sync queue
+```
+
+### 6.6 验证真实标签提醒流程
+
+推荐验证顺序：
+
+1. 网关能扫描到 nRF52810 夹具节点。
+2. 网关能连接夹具节点。
+3. 网关能发送 TAG_WAKE / ALERT 命令。
+4. 夹具节点 RGB 能亮起。
+5. 夹具节点蜂鸣器能按时响起并自动停止。
+6. 夹具节点能上报状态。
+7. 网关能记录事件并通过 sync-push 回传服务端。
+
+## 7. 当前验证目标
+
+当前阶段的目标不是直接上线，而是完成局域网最小闭环验证。
+
+### 7.1 软件 mock 最小闭环
 
 ```text
 服务端启动
@@ -416,23 +575,49 @@ MySQL / EMQX 启动
 服务端更新取件状态
 ```
 
-完成该闭环后，即可证明 SPS 的服务端与本地网关核心架构可运行。
+### 7.2 硬件接入最小闭环
 
-## 6. 后续开发方向
+```text
+nRF52810 固件构建成功
+↓
+SWD 烧录成功
+↓
+夹具节点启动并输出 RTT 日志
+↓
+网关发现并连接夹具节点
+↓
+用户 mock-nfc / NFC 刷卡
+↓
+网关向夹具节点发送提醒命令
+↓
+夹具节点亮灯/蜂鸣
+↓
+网关记录事件
+↓
+网关 sync-push 回传服务端
+```
+
+完成以上闭环后，即可证明 SPS 的服务端、本地网关和智能夹具节点三端架构可运行。
+
+## 8. 后续开发方向
 
 后续可以按以下顺序推进：
 
 1. 统一服务端与网关的 HMAC 签名规则。
-2. 补充完整的包裹、标签、绑定关系初始化接口。
-3. 将 mock NFC 替换为 PN532 / RC522 实际读卡器。
-4. 将 mock BLE 替换为真实 BLE 标签控制。
-5. 接入微信小程序，完成管理员入库与用户取件入口。
-6. 增加正式认证，例如 JWT / 微信登录。
-7. 迁移到公网服务器，并启用 HTTPS、MQTT TLS、密钥轮换和日志监控。
+2. 明确网关与夹具节点的 BLE GATT Service 与二进制帧协议。
+3. 补充完整的包裹、标签、绑定关系初始化接口。
+4. 完善 `clip-node-nrf52810/docs/hardware_pins.md` 的实际引脚映射。
+5. 将 mock NFC 替换为 PN532 / RC522 实际读卡器。
+6. 将 mock BLE 替换为真实 BLE 标签控制。
+7. 接入微信小程序，完成管理员入库与用户取件入口。
+8. 增加正式认证，例如 JWT / 微信登录。
+9. 迁移到公网服务器，并启用 HTTPS、MQTT TLS、密钥轮换和日志监控。
+10. 做夹具节点功耗实测：空闲电流、告警电流、日均电量消耗。
 
-## 7. 子项目文档
+## 9. 子项目文档
 
 更多细节请查看：
 
 - `smartparcel-server/README.md`
 - `smartparcel-gateway/README.md`
+- `clip-node-nrf52810/README.md`
