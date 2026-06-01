@@ -33,6 +33,13 @@ class SyncService:
 
     def sync_pull_once(self) -> dict:
         data = self.client.sync_pull()
+        # Compatible with the server's current sync contract: {"events": [...]}
+        # while keeping backward compatibility with the old denormalized payload.
+        if "events" in data and not any(k in data for k in ("parcels", "tags", "bindings")):
+            self.db.commit()
+            logger.info("sync pull done")
+            return data
+
         for p in data.get("parcels", []):
             obj = self.db.scalar(select(LocalParcel).where(LocalParcel.server_parcel_id == p["server_parcel_id"]))
             if obj is None:
@@ -101,7 +108,7 @@ class SyncService:
         for row in rows:
             try:
                 payload = json.loads(row.payload_json)
-                self.client.sync_push({"items": [payload]})
+                self.client.sync_push([payload])
                 row.status = SyncQueueStatus.ACKED
                 sent += 1
                 event = self.db.scalar(select(LocalPickupEvent).where(LocalPickupEvent.event_id == row.event_id))
@@ -128,5 +135,5 @@ class SyncService:
         self.db.add(event)
         self.db.commit()
         self.db.refresh(event)
-        self.enqueue_event_upload({"event_id": event_id, "event_type": event_type.value, "payload": payload})
+        self.enqueue_event_upload({"event_id": event_id, "event_type": event_type.value, "payload_json": payload})
         return event

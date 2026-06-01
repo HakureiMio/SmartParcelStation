@@ -69,6 +69,14 @@ async def gateway_heartbeat(db: AsyncSession, gateway_code: str, status_value: s
     return gateway
 
 
+async def get_gateway_by_code(db: AsyncSession, gateway_code: str) -> Gateway:
+    result = await db.execute(select(Gateway).where(Gateway.gateway_code == gateway_code))
+    gateway = result.scalar_one_or_none()
+    if not gateway:
+        raise _not_found('gateway')
+    return gateway
+
+
 async def create_parcel(db: AsyncSession, data: dict, admin_id: int) -> Parcel:
     parcel = Parcel(**data, created_by_admin_id=admin_id)
     db.add(parcel)

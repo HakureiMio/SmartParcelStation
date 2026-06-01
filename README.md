@@ -303,19 +303,93 @@ Invoke-RestMethod -Method POST `
   -Body $body
 ```
 
+#### 5.3.1 初始化开发占位用户（建议先执行）
+
+`/api/v1/stations`、`/api/v1/parcels` 等接口默认启用开发态鉴权，会校验请求头：
+
+- `X-Dev-User-Id`
+- `X-Dev-Role`
+
+若数据库中不存在对应用户，或角色不匹配，常见报错为：
+
+- `User not found or inactive`
+- `Role mismatch`
+
+建议先执行一次初始化脚本（幂等，可重复执行）：
+
+```powershell
+cd smartparcel-server
+$env:PYTHONPATH='.'
+.venv\Scripts\python.exe scripts/init_dev_user.py
+```
+
+输出 `created` 或 `updated` 都表示可用。该脚本会确保存在：
+
+- `id = 1`
+- `role = SERVER_ADMIN`
+- `is_active = true`
+
+#### 5.3.2 常见问题排查
+
+1. 创建站点时报一大串数据库异常  
+通常是 `station_code` 重复（例如 `ST001` 已存在）。先查询站点列表再决定是否换编码：
+
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:18000/api/v1/stations"
+```
+
+2. 创建快递时报外键错误（`receiver_user_id`）  
+`receiver_user_id` 必须在 `users.id` 中存在。联调阶段可先不传该字段，或先创建对应用户。
+
+#### 5.3.3 初始化收件人占位用户（用于 `receiver_user_id=2`）
+
+如需按示例使用 `receiver_user_id = 2`，请先创建占位收件用户：
+
+```powershell
+cd smartparcel-server
+$env:PYTHONPATH='.'
+.venv\Scripts\python.exe scripts/init_dev_receiver_user.py
+```
+
+输出 `created` 或 `updated` 都表示可用。该脚本会确保存在：
+
+- `id = 2`
+- `role = USER`
+- `is_active = true`
+
 ### 5.4 创建快递测试数据
 
 ```powershell
 $headers = @{
   "Content-Type" = "application/json"
   "X-Dev-User-Id" = "1"
-  "X-Dev-Role" = "LOCAL_ADMIN"
+  "X-Dev-Role" = "SERVER_ADMIN"
 }
 
 $body = @{
   parcel_code = "P20260528001"
   station_id = 1
   receiver_user_id = 2
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri "http://127.0.0.1:18000/api/v1/parcels" `
+  -Headers $headers `
+  -Body $body
+```
+
+若仅做最小联调（不依赖收件人外键），可使用不带 `receiver_user_id` 的请求：
+
+```powershell
+$headers = @{
+  "Content-Type" = "application/json"
+  "X-Dev-User-Id" = "1"
+  "X-Dev-Role" = "SERVER_ADMIN"
+}
+
+$body = @{
+  parcel_code = "P20260528002"
+  station_id = 1
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method POST `
@@ -371,6 +445,34 @@ python -m gateway.main init-db
 
 ```powershell
 python -m gateway.main health
+```
+
+#### 5.5.1 先注册网关（`heartbeat` 前置步骤）
+
+若未注册网关，执行 `python -m gateway.main heartbeat` 会返回 `404` 或 `gateway not found`。  
+请先在服务端执行网关注册：
+
+```powershell
+$body = @{
+  gateway_code = "GW001"
+  station_id = 1
+  device_secret_hash = "gw-secret-demo"
+  status = "ACTIVE"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri "http://127.0.0.1:18000/api/v1/gateways/register" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+然后检查并对齐 `smartparcel-gateway/.env`：
+
+```env
+GATEWAY_CODE=GW001
+GATEWAY_SECRET=gw-secret-demo
+STATION_ID=1
+SERVER_BASE_URL=http://127.0.0.1:18000
 ```
 
 发送心跳：

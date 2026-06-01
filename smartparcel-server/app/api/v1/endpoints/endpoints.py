@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -69,21 +69,23 @@ async def gateway_heartbeat(payload: GatewayHeartbeatIn, db: AsyncSession = Depe
     return await services.gateway_heartbeat(db, payload.gateway_code, payload.status)
 
 
-@router.get('/gateways/{gateway_id}/sync/pull', response_model=GatewaySyncPullOut)
-async def gateway_pull_sync(gateway_id: int, db: AsyncSession = Depends(get_db)):
-    events = await services.gateway_pull_sync(db, gateway_id)
+@router.get('/gateways/{gateway_code}/sync/pull', response_model=GatewaySyncPullOut)
+async def gateway_pull_sync(gateway_code: str, db: AsyncSession = Depends(get_db)):
+    gateway = await services.get_gateway_by_code(db, gateway_code)
+    events = await services.gateway_pull_sync(db, gateway.id)
     return GatewaySyncPullOut(events=[{'id': e.id, 'event_id': e.event_id, 'event_type': e.event_type, 'payload_json': e.payload_json} for e in events])
 
 
-@router.post('/gateways/{gateway_id}/sync/push')
-async def gateway_push_sync(gateway_id: int, items: list[SyncPushItem], db: AsyncSession = Depends(get_db)):
-    result = await services.gateway_push_sync(db, gateway_id, station_id=1, items=[i.model_dump() for i in items])
+@router.post('/gateways/{gateway_code}/sync/push')
+async def gateway_push_sync(gateway_code: str, items: list[SyncPushItem], db: AsyncSession = Depends(get_db)):
+    gateway = await services.get_gateway_by_code(db, gateway_code)
+    result = await services.gateway_push_sync(db, gateway.id, station_id=gateway.station_id, items=[i.model_dump() for i in items])
     return result
 
 
-@router.post('/gateways/{gateway_id}/events')
+@router.post('/gateways/{gateway_code}/events')
 async def gateway_events(
-    gateway_id: int,
+    gateway_code: str,
     payload: GatewayEventIn,
     request: Request,
     x_gateway_code: str | None = Header(default=None, alias='X-Gateway-Code'),
@@ -97,7 +99,16 @@ async def gateway_events(
         db=db,
         fallback_secret=settings.default_gateway_secret,
     )
-    return await services.create_gateway_event(db, gateway_id=gateway_id, station_id=gateway.station_id, event_id=payload.event_id, event_type=payload.event_type, payload=payload.payload_json)
+    if gateway.gateway_code != gateway_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='gateway code mismatch between path and headers')
+    return await services.create_gateway_event(
+        db,
+        gateway_id=gateway.id,
+        station_id=gateway.station_id,
+        event_id=payload.event_id,
+        event_type=payload.event_type,
+        payload=payload.payload_json,
+    )
 
 
 @router.post('/parcels', response_model=ParcelOut)
@@ -181,3 +192,4 @@ async def user_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
 @router.post('/notifications/{notification_id}/read', response_model=NotificationOut)
 async def read_notification(notification_id: int, db: AsyncSession = Depends(get_db)):
     return await services.mark_notification_read(db, notification_id)
+

@@ -22,7 +22,7 @@ class ServerClient:
             payload=payload,
         )
         url = f"{self.base_url}{path}"
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0, trust_env=False) as client:
             if method.upper() == "GET":
                 resp = client.get(url, headers=headers)
             else:
@@ -36,12 +36,12 @@ class ServerClient:
         return self._request("GET", "/api/v1/health")
 
     def heartbeat(self):
-        return self._request("POST", "/api/v1/gateways/heartbeat", {"station_id": self.settings.station_id})
+        return self._request("POST", "/api/v1/gateways/heartbeat", {"gateway_code": self.settings.gateway_code, "status": "ONLINE"})
 
     def sync_pull(self):
         return self._request("GET", f"/api/v1/gateways/{self.settings.gateway_code}/sync/pull")
 
-    def sync_push(self, payload: dict[str, Any]):
+    def sync_push(self, payload: list[dict[str, Any]]):
         return self._request("POST", f"/api/v1/gateways/{self.settings.gateway_code}/sync/push", payload)
 
     def post_events(self, payload: dict[str, Any]):
