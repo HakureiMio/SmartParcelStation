@@ -1,0 +1,16 @@
+identifier: clip_node_nrf52810
+name: Smart Parcel Clip Node nRF52810
+vendor: smartparcel
+type: mcu
+arch: arm
+ram: 24
+flash: 192
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - gpio
+  - adc
+  - pwm
+  - watchdog
+  - counter

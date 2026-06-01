@@ -1,0 +1,44 @@
+/dts-v1/;
+#include <nordic/nrf52810_qfaa.dtsi>
+
+/ {
+	model = "Smart Parcel Clip Node nRF52810";
+	compatible = "smartparcel,clip-node-nrf52810";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+
+	/*
+	 * 说明：引脚映射尚未最终确定。
+	 * 当前 DTS 只启用必要外设节点，具体引脚请在后续通过 overlay 或 pinctrl 文件补齐。
+	 */
+	aliases {
+		watchdog0 = &wdt0;
+	};
+};
+
+&reg {
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&adc {
+	status = "okay";
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+&uart0 {
+	status = "disabled";
+};

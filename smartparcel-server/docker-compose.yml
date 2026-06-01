@@ -1,0 +1,44 @@
+﻿version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: smartparcel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: smartparcel
+      MYSQL_USER: smartparcel
+      MYSQL_PASSWORD: smartparcel
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  emqx:
+    image: emqx/emqx:5.8.4
+    container_name: smartparcel-emqx
+    restart: unless-stopped
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: public
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "8084:8084"
+      - "18083:18083"
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: smartparcel-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+
+volumes:
+  mysql_data:

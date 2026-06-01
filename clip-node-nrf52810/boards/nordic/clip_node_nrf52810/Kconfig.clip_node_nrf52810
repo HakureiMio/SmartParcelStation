@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_CLIP_NODE_NRF52810
+	select SOC_NRF52810_QFAA

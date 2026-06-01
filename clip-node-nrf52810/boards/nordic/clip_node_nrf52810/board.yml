@@ -1,0 +1,6 @@
+board:
+  name: clip_node_nrf52810
+  full_name: Smart Parcel Clip Node nRF52810
+  vendor: smartparcel
+  socs:
+  - name: nrf52810
