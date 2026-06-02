@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 from admin_console.api_client import ApiClient
-from admin_console.db_ops import create_default_data
+from admin_console.db_ops import DEFAULT_GATEWAY_SECRET, create_default_data
 from admin_console.formatters import (
     GATEWAY_COLUMNS,
     NOTIFICATION_COLUMNS,
@@ -153,7 +153,8 @@ class Menu:
         if choice == '1':
             print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         elif choice == '2':
-            gateway = self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': 'gw-secret-demo', 'status': 'ACTIVE'}, bootstrap=True)
+            gateway_secret = ask('网关密钥，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
+            gateway = self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'}, bootstrap=True)
             print(format_gateway_result(gateway))
         elif choice == '3':
             print_rows(self.client.get('/gateways', auth=True), ['gateway_code', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
@@ -209,7 +210,8 @@ class Menu:
         print('\n1 创建默认测试数据\n2 检查默认数据\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            create_default_data(self.client)
+            gateway_secret = ask('网关密钥，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
+            create_default_data(self.client, gateway_secret=gateway_secret)
             print('默认测试数据初始化完成：默认用户、站点 ST001、网关 GW001 已检查。')
         elif choice == '2':
             print('\n默认用户：')
