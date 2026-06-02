@@ -44,6 +44,9 @@ def print_http_error(exc: httpx.HTTPStatusError) -> None:
         detail = body.get('detail', '')
     except Exception:
         detail = exc.response.text
+    if 'gateway_registration_tokens' in detail and ('no such table' in detail or "doesn't exist" in detail or 'doesn' in detail):
+        print('操作失败：网关注册凭证表不存在，请先在 smartparcel-server 目录执行 python -m alembic upgrade head。')
+        return
     suffix = f'，原因：{detail}' if detail else ''
     print(f'操作失败：接口返回 {status_code}{suffix}')
 
@@ -171,6 +174,10 @@ class Menu:
             print_rows(rows, ['id', 'token_id', 'gateway_code', 'station_id', 'status', 'expires_at', 'used_at', 'created_at'], GATEWAY_TOKEN_COLUMNS)
         elif choice == '4':
             token_id = ask('凭证ID')
+            if not token_id.isdigit():
+                print('操作失败：请输入数字形式的凭证ID。请先选择“3 查看网关注册凭证”，使用第一列“凭证ID”。')
+                pause()
+                return
             token = self.client.post(f'/gateways/registration-tokens/{token_id}/revoke', auth=True)
             print(f"注册凭证已撤销：{token.get('id', '-')} / {token.get('gateway_code', '-')} / {token.get('status', '-')}")
         elif choice == '5':

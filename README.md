@@ -200,3 +200,184 @@ python -m gateway.main sync-push
 安全约束：短期 token 默认 10 分钟有效、只显示一次、数据库只保存 hash、使用后失效、可由管理员撤销；长期 `gateway_secret` 不能提交到 Git。
 
 详见：`smartparcel-server/README.md` 和 `smartparcel-gateway/README.md`。
+
+## 站点与网关注册测试完整流程
+
+本流程用于本地开发或局域网联调，目标是验证：先创建站点，再创建网关短期注册凭证，最后让 gateway 使用凭证激活并完成 heartbeat。
+
+### 1. 启动 server
+
+```powershell
+cd smartparcel-server
+.\.venv\Scripts\activate
+python -m alembic upgrade head
+uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload
+```
+
+### 2. 打开 server 管理面板
+
+另开一个终端：
+
+```powershell
+cd smartparcel-server
+.\.venv\Scripts\activate
+python -m admin_console.main
+```
+
+### 3. 创建或确认站点
+
+在面板中进入：
+
+```text
+3 站点管理
+```
+
+推荐先选择：
+
+```text
+1 查看站点
+```
+
+如果已有默认站点，通常会看到：
+
+```text
+站点ID | 站点编码 | 站点名称 | 状态
+1      | ST001    | 主站点   | ACTIVE
+```
+
+如果没有站点，可以选择：
+
+```text
+2 创建默认站点 ST001
+```
+
+或选择：
+
+```text
+3 创建站点
+```
+
+站点状态建议使用固定值：
+
+- `ACTIVE`：正常启用，测试时默认使用这个。
+- `DISABLED`：停用。
+- `MAINTENANCE`：维护中。
+- `CLOSED`：已关闭。
+
+注意：创建网关注册凭证时填写的 `站点ID` 必须已经存在。例如只有 `站点ID=1` 时，就不能填写 `2`，否则会报：`station not found`。
+
+### 4. 创建网关短期注册凭证
+
+回到主菜单，进入：
+
+```text
+4 网关管理
+2 创建网关短期注册凭证
+```
+
+示例输入：
+
+```text
+网关编码 [GW001]: GW001
+站点ID [1]: 1
+有效期秒数 [600]: 600
+```
+
+成功后面板会显示一次短期注册凭证，例如：
+
+```text
+网关短期注册凭证已创建：
+网关编码：GW001
+站点ID：1
+注册凭证：ABCD-1234-EFGH-5678
+有效期至：2026-06-03T...
+注意：该凭证只显示一次，请妥善保存。
+```
+
+说明：
+
+- `registration_token` 默认 10 分钟有效。
+- 明文 token 只显示一次。
+- server 数据库只保存 token hash。
+- token 用过后会变成 `USED`，不能重复激活。
+
+### 5. 使用 gateway CLI 激活网关
+
+切到 gateway 终端：
+
+```powershell
+cd smartparcel-gateway
+.\.venv\Scripts\activate
+python -m gateway.main bootstrap-activate `
+  --gateway-code GW001 `
+  --station-id 1 `
+  --registration-token ABCD-1234-EFGH-5678 `
+  --server-base-url http://127.0.0.1:18000
+```
+
+激活成功后，gateway 会把以下配置写入 `.env`，并备份原文件为 `.env.bak`：
+
+```env
+GATEWAY_CODE=GW001
+GATEWAY_SECRET=********
+STATION_ID=1
+SERVER_BASE_URL=http://127.0.0.1:18000
+```
+
+注意：`.env` 和长期 `GATEWAY_SECRET` 不要提交到 Git。
+
+### 6. 初始化 gateway 并验证心跳
+
+```powershell
+python -m gateway.main init-db
+python -m gateway.main health
+python -m gateway.main heartbeat
+```
+
+如果 heartbeat 成功，回到 server 面板：
+
+```text
+4 网关管理
+1 查看网关
+```
+
+应该能看到类似：
+
+```text
+网关ID | 网关编码 | 站点ID | 状态 | 最近心跳
+1      | GW001    | 1      | 在线 | 2026-06-03T...
+```
+
+如果关闭 gateway 后再次查看，面板会根据 `最近心跳` 判断展示状态：
+
+- 最近心跳未超时：`在线`
+- 最近心跳超过阈值：`离线（心跳超时）`
+- 从未心跳：`未连接`
+
+### 7. 查看或撤销注册凭证
+
+在 server 面板进入：
+
+```text
+4 网关管理
+3 查看网关注册凭证
+```
+
+列表不会显示明文 token，只显示状态、过期时间、使用时间等审计信息。
+
+如果要撤销未使用凭证：
+
+```text
+4 网关管理
+4 撤销网关注册凭证
+```
+
+输入凭证 ID 后，状态会变为 `REVOKED`。已撤销凭证不能再激活网关。
+
+### 8. 常见错误
+
+- `station not found`：填写的 `站点ID` 不存在，请先在站点管理里查看或创建站点。
+- `Registration token expired`：短期凭证已过期，请重新创建。
+- `Registration token already used`：凭证已经激活过，不能重复使用。
+- `Registration token revoked`：凭证已被管理员撤销。
+- heartbeat 返回 `401`：gateway `.env` 中的 `GATEWAY_SECRET`、`GATEWAY_CODE` 或 server 数据库记录不匹配。

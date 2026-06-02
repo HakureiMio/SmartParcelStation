@@ -1,7 +1,7 @@
 """gateway registration tokens
 
 Revision ID: 0004_gateway_registration_tokens
-Revises: 0003_gateway_nonce_replay_protection
+Revises: 0003_gateway_nonce_replay
 Create Date: 2026-06-02 00:00:00
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = '0004_gateway_registration_tokens'
-down_revision: Union[str, None] = '0003_gateway_nonce_replay_protection'
+down_revision: Union[str, None] = '0003_gateway_nonce_replay'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -21,6 +21,9 @@ token_status = sa.Enum('PENDING', 'USED', 'EXPIRED', 'REVOKED', name='gatewayreg
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    if 'gateway_registration_tokens' in inspector.get_table_names():
+        return
     op.create_table(
         'gateway_registration_tokens',
         sa.Column('id', sa.Integer(), primary_key=True),
@@ -41,6 +44,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_gateway_registration_tokens_gateway_code', table_name='gateway_registration_tokens')
-    op.drop_table('gateway_registration_tokens')
+    inspector = sa.inspect(op.get_bind())
+    if 'gateway_registration_tokens' in inspector.get_table_names():
+        indexes = {index['name'] for index in inspector.get_indexes('gateway_registration_tokens')}
+        if 'ix_gateway_registration_tokens_gateway_code' in indexes:
+            op.drop_index('ix_gateway_registration_tokens_gateway_code', table_name='gateway_registration_tokens')
+        op.drop_table('gateway_registration_tokens')
     token_status.drop(op.get_bind(), checkfirst=True)
