@@ -62,6 +62,40 @@ python -m gateway.main heartbeat
 
 签名串：`method + path + timestamp + nonce + body_hash`。
 
+### 5.1 使用短期注册凭证激活网关
+
+正式公网实验推荐使用“短期注册凭证 → 激活 → 长期密钥”的流程，不再把长期 `GATEWAY_SECRET` 手工同时填入 server 和 gateway。
+
+测试流程：
+
+1. 在 server 面板进入“网关管理”，创建网关短期注册凭证。
+2. 当前手机 App / 微信小程序 / 蓝牙或热点配置界面暂未实现，先用 CLI 模拟管理员把凭证写入网关。
+3. 在 gateway 执行：
+
+```bash
+python -m gateway.main bootstrap-activate \
+  --gateway-code GW001 \
+  --station-id 1 \
+  --registration-token ABCD-1234-EFGH-5678 \
+  --server-base-url http://127.0.0.1:18000
+```
+
+命令会调用 `/api/v1/gateways/bootstrap/activate`，成功后把以下配置写入 `.env`，并先备份原文件为 `.env.bak`：
+
+```env
+GATEWAY_CODE=GW001
+GATEWAY_SECRET=********
+STATION_ID=1
+SERVER_BASE_URL=http://127.0.0.1:18000
+```
+
+注意：
+
+- 控制台默认只显示脱敏后的长期密钥；如需手动复制，可加 `--no-write-env`，长期密钥只显示一次。
+- `.env` 不要提交到 Git。
+- 手动配置 `GATEWAY_CODE=GW001`、`GATEWAY_SECRET=gw-secret-demo` 仍可用于本地开发调试。
+- 正式公网实验推荐使用短期注册凭证激活流程，后续微信小程序或管理员 App 可替代当前 CLI。
+
 ## 6. 如何连接 EMQX
 
 网关启动后自动连接并使用主题：

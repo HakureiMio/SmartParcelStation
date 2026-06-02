@@ -26,6 +26,17 @@ GATEWAY_COLUMNS = {
     'last_seen_at': '最近心跳',
 }
 
+GATEWAY_TOKEN_COLUMNS = {
+    'id': '凭证ID',
+    'token_id': '追踪编号',
+    'gateway_code': '网关编码',
+    'station_id': '站点ID',
+    'status': '状态',
+    'expires_at': '有效期至',
+    'used_at': '使用时间',
+    'created_at': '创建时间',
+}
+
 PARCEL_COLUMNS = {
     'id': '包裹ID',
     'parcel_code': '快递号',
@@ -48,6 +59,14 @@ SYNC_COLUMNS = {
     'direction': '方向',
     'status': '状态',
     'created_at': '创建时间',
+}
+
+QUERY_COLUMNS = {
+    'id': '包裹ID',
+    'parcel_code': '快递号',
+    'status': '业务状态',
+    'origin': '来源',
+    'receiver_phone_masked': '收件手机号',
 }
 
 
@@ -73,6 +92,18 @@ def format_gateway_result(gateway: dict[str, Any]) -> str:
     return f"网关注册成功：{gateway.get('gateway_code', '-')}，当前状态：{gateway.get('status', '-')}"
 
 
+def format_gateway_token_result(token: dict[str, Any]) -> list[str]:
+    return [
+        '网关短期注册凭证已创建：',
+        f"网关编码：{token.get('gateway_code', '-')}",
+        f"站点ID：{token.get('station_id', '-')}",
+        f"注册凭证：{token.get('registration_token', '-')}",
+        f"有效期至：{token.get('expires_at', '-')}",
+        token.get('message') or '请在有效期内写入该注册凭证。',
+        '注意：该凭证只显示一次，请妥善保存。',
+    ]
+
+
 def format_parcel_result(parcel: dict[str, Any], action: str = '包裹操作完成') -> str:
     return (
         f"{action}：{parcel.get('parcel_code', '-')}，"
@@ -95,12 +126,3 @@ def format_query_result(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
-
-
-QUERY_COLUMNS = {
-    'id': '包裹ID',
-    'parcel_code': '快递号',
-    'status': '业务状态',
-    'origin': '来源',
-    'receiver_phone_masked': '收件手机号',
-}

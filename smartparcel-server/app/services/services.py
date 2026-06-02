@@ -1,12 +1,16 @@
 ﻿import uuid
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.enums import (
     EventSource,
+    GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
     ParcelOrigin,
@@ -19,7 +23,7 @@ from app.models.enums import (
     TagStatus,
     UserRole,
 )
-from app.models.models import Gateway, GatewaySyncEvent, Notification, Parcel, ParcelTagBinding, PickupEvent, Station, Tag, User
+from app.models.models import Gateway, GatewayRegistrationToken, GatewaySyncEvent, Notification, Parcel, ParcelTagBinding, PickupEvent, Station, Tag, User
 
 
 def _not_found(name: str) -> HTTPException:
@@ -134,6 +138,118 @@ async def get_gateway_by_code(db: AsyncSession, gateway_code: str) -> Gateway:
 async def list_gateways(db: AsyncSession) -> list[Gateway]:
     result = await db.execute(select(Gateway).order_by(Gateway.id.desc()))
     return list(result.scalars().all())
+
+
+def generate_registration_token(byte_count: int) -> str:
+    raw = secrets.token_urlsafe(byte_count).replace('_', '').replace('-', '').upper()
+    token = raw[:20]
+    return '-'.join(token[index : index + 4] for index in range(0, len(token), 4))
+
+
+def hash_registration_token(token: str) -> str:
+    return hashlib.sha256(token.strip().encode('utf-8')).hexdigest()
+
+
+def generate_gateway_secret(byte_count: int) -> str:
+    return secrets.token_urlsafe(byte_count)
+
+
+def is_expired(expires_at: datetime, now: datetime) -> bool:
+    if expires_at.tzinfo is None:
+        return expires_at <= now.replace(tzinfo=None)
+    return expires_at <= now
+
+
+async def create_gateway_registration_token(
+    db: AsyncSession,
+    gateway_code: str,
+    station_id: int,
+    ttl_seconds: int | None,
+    created_by_admin_id: int | None,
+) -> tuple[GatewayRegistrationToken, str]:
+    await get_station(db, station_id)
+    settings = get_settings()
+    effective_ttl = ttl_seconds or settings.gateway_registration_token_ttl_seconds
+    if effective_ttl <= 0:
+        raise HTTPException(status_code=400, detail='ttl_seconds must be positive')
+
+    plain_token = generate_registration_token(settings.gateway_registration_token_bytes)
+    row = GatewayRegistrationToken(
+        token_id=uuid.uuid4().hex[:12],
+        gateway_code=gateway_code,
+        station_id=station_id,
+        token_hash=hash_registration_token(plain_token),
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=effective_ttl),
+        status=GatewayRegistrationTokenStatus.PENDING,
+        created_by_admin_id=created_by_admin_id,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row, plain_token
+
+
+async def list_gateway_registration_tokens(db: AsyncSession) -> list[GatewayRegistrationToken]:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(select(GatewayRegistrationToken).order_by(GatewayRegistrationToken.id.desc()).limit(100))
+    rows = list(result.scalars().all())
+    changed = False
+    for row in rows:
+        if row.status == GatewayRegistrationTokenStatus.PENDING and is_expired(row.expires_at, now):
+            row.status = GatewayRegistrationTokenStatus.EXPIRED
+            changed = True
+    if changed:
+        await db.commit()
+    return rows
+
+
+async def revoke_gateway_registration_token(db: AsyncSession, token_id: int) -> GatewayRegistrationToken:
+    row = await db.get(GatewayRegistrationToken, token_id)
+    if not row:
+        raise _not_found('gateway registration token')
+    if row.status == GatewayRegistrationTokenStatus.PENDING:
+        row.status = GatewayRegistrationTokenStatus.REVOKED
+        await db.commit()
+        await db.refresh(row)
+    return row
+
+
+async def activate_gateway_registration(
+    db: AsyncSession,
+    gateway_code: str,
+    station_id: int,
+    registration_token: str,
+) -> tuple[Gateway, str]:
+    await get_station(db, station_id)
+    result = await db.execute(
+        select(GatewayRegistrationToken).where(GatewayRegistrationToken.token_hash == hash_registration_token(registration_token))
+    )
+    token_row = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not token_row:
+        raise HTTPException(status_code=401, detail='Invalid registration token')
+    if token_row.gateway_code != gateway_code or token_row.station_id != station_id:
+        raise HTTPException(status_code=401, detail='Registration token does not match gateway')
+    if token_row.status == GatewayRegistrationTokenStatus.REVOKED:
+        raise HTTPException(status_code=401, detail='Registration token revoked')
+    if token_row.status == GatewayRegistrationTokenStatus.USED:
+        raise HTTPException(status_code=401, detail='Registration token already used')
+    if token_row.status == GatewayRegistrationTokenStatus.EXPIRED or is_expired(token_row.expires_at, now):
+        token_row.status = GatewayRegistrationTokenStatus.EXPIRED
+        await db.commit()
+        raise HTTPException(status_code=401, detail='Registration token expired')
+
+    settings = get_settings()
+    gateway_secret = generate_gateway_secret(settings.gateway_secret_bytes)
+    gateway = await register_gateway(
+        db,
+        {'gateway_code': gateway_code, 'station_id': station_id, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'},
+    )
+    token_row.status = GatewayRegistrationTokenStatus.USED
+    token_row.used_at = now
+    await db.commit()
+    await db.refresh(gateway)
+    return gateway, gateway_secret
 
 
 async def create_parcel(db: AsyncSession, data: dict, admin_id: int | None) -> Parcel:

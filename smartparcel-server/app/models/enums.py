@@ -82,6 +82,13 @@ class SyncStatus(str, Enum):
     FAILED = 'FAILED'
 
 
+class GatewayRegistrationTokenStatus(str, Enum):
+    PENDING = 'PENDING'
+    USED = 'USED'
+    EXPIRED = 'EXPIRED'
+    REVOKED = 'REVOKED'
+
+
 class NotificationType(str, Enum):
     IN_APP = 'IN_APP'
     WECHAT_SUBSCRIBE = 'WECHAT_SUBSCRIBE'

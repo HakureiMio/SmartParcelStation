@@ -6,6 +6,7 @@ from admin_console.api_client import ApiClient
 from admin_console.db_ops import DEFAULT_GATEWAY_SECRET, create_default_data
 from admin_console.formatters import (
     GATEWAY_COLUMNS,
+    GATEWAY_TOKEN_COLUMNS,
     NOTIFICATION_COLUMNS,
     PARCEL_COLUMNS,
     QUERY_COLUMNS,
@@ -13,6 +14,7 @@ from admin_console.formatters import (
     SYNC_COLUMNS,
     USER_COLUMNS,
     format_gateway_result,
+    format_gateway_token_result,
     format_notification_result,
     format_parcel_result,
     format_query_result,
@@ -52,7 +54,7 @@ class Menu:
     def run(self) -> None:
         while True:
             print(
-                '\nSmartParcel 服务器终端面板\n'
+                '\nSmartParcel 服务端终端面板\n'
                 '1 系统状态\n'
                 '2 用户管理\n'
                 '3 站点管理\n'
@@ -65,7 +67,10 @@ class Menu:
                 '0 主面板 / 返回上一级\n'
                 'exit 退出面板'
             )
-            choice = input('> ').strip().lower()
+            try:
+                choice = input('> ').strip().lower()
+            except EOFError:
+                return
             try:
                 if choice == 'exit':
                     return
@@ -125,8 +130,7 @@ class Menu:
             user_id = ask('用户ID')
             is_active = ask('是否启用 true/false', 'true').lower() == 'true'
             user = self.client.patch(f'/users/{user_id}', {'is_active': is_active})
-            action = '用户已启用' if is_active else '用户已禁用'
-            print(format_user_result(user, action))
+            print(format_user_result(user, '用户已启用' if is_active else '用户已禁用'))
         elif choice == '5':
             user_id = ask('用户ID')
             user = self.client.patch(f'/users/{user_id}', {'role': ask('角色', 'USER')})
@@ -148,20 +152,31 @@ class Menu:
         pause()
 
     def gateway_menu(self) -> None:
-        print('\n1 查看网关\n2 注册默认网关 GW001\n3 查看网关心跳状态\n0 返回')
+        print('\n网关管理\n1 查看网关\n2 创建网关短期注册凭证\n3 查看网关注册凭证\n4 撤销网关注册凭证\n5 查看网关心跳状态\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
             print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         elif choice == '2':
-            gateway_secret = ask('网关密钥，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
-            gateway = self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'}, bootstrap=True)
-            print(format_gateway_result(gateway))
+            payload = {
+                'gateway_code': ask('网关编码', 'GW001'),
+                'station_id': int(ask('站点ID', '1')),
+                'ttl_seconds': int(ask('有效期秒数', '600')),
+            }
+            token = self.client.post('/gateways/registration-tokens', payload, bootstrap=True)
+            print_block('注册凭证', format_gateway_token_result(token))
         elif choice == '3':
+            rows = self.client.get('/gateways/registration-tokens', auth=True)
+            print_rows(rows, ['id', 'token_id', 'gateway_code', 'station_id', 'status', 'expires_at', 'used_at', 'created_at'], GATEWAY_TOKEN_COLUMNS)
+        elif choice == '4':
+            token_id = ask('凭证ID')
+            token = self.client.post(f'/gateways/registration-tokens/{token_id}/revoke', auth=True)
+            print(f"注册凭证已撤销：{token.get('id', '-')} / {token.get('gateway_code', '-')} / {token.get('status', '-')}")
+        elif choice == '5':
             print_rows(self.client.get('/gateways', auth=True), ['gateway_code', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         pause()
 
     def parcel_menu(self) -> None:
-        print('\n1 服务器手动预录入快递\n2 查看包裹列表\n3 按快递号查询\n0 返回')
+        print('\n1 服务端手动预录入快递\n2 查看包裹列表\n3 按快递号查询\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
             payload = {
@@ -207,10 +222,10 @@ class Menu:
         pause()
 
     def dev_menu(self) -> None:
-        print('\n1 创建默认测试数据\n2 检查默认数据\n0 返回')
+        print('\n1 创建默认测试数据（本地开发，可直接注册默认网关）\n2 检查默认数据\n3 直接注册默认网关 GW001（仅本地开发）\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            gateway_secret = ask('网关密钥，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
+            gateway_secret = ask('网关密钥，仅本地开发使用，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
             create_default_data(self.client, gateway_secret=gateway_secret)
             print('默认测试数据初始化完成：默认用户、站点 ST001、网关 GW001 已检查。')
         elif choice == '2':
@@ -220,4 +235,8 @@ class Menu:
             print_rows(self.client.get('/stations', auth=True), ['id', 'station_code', 'status'], STATION_COLUMNS)
             print('\n默认网关：')
             print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'status'], GATEWAY_COLUMNS)
+        elif choice == '3':
+            gateway_secret = ask('网关密钥，仅本地开发使用，请与 ARM 机配置保持一致', DEFAULT_GATEWAY_SECRET)
+            gateway = self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'}, bootstrap=True)
+            print(format_gateway_result(gateway))
         pause()

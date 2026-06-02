@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 import time
+import shutil
+from pathlib import Path
 from sqlalchemy import select
 import typer
 from loguru import logger
@@ -29,6 +31,29 @@ def _prepare_console() -> None:
     setup_utf8_console()
 
 
+def _upsert_env_values(env_path: Path, values: dict[str, str]) -> None:
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    existing_keys = set()
+    output: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            output.append(line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key in values:
+            output.append(f"{key}={values[key]}")
+            existing_keys.add(key)
+        else:
+            output.append(line)
+    for key, value in values.items():
+        if key not in existing_keys:
+            output.append(f"{key}={value}")
+    if env_path.exists():
+        shutil.copy2(env_path, env_path.with_suffix(env_path.suffix + ".bak"))
+    env_path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
 @app.command("init-db")
 def cli_init_db():
     _prepare_console()
@@ -45,6 +70,49 @@ def cli_health():
     setup_logging(settings.log_level)
     client = ServerClient(settings)
     typer.echo(client.health())
+
+
+@app.command("bootstrap-activate")
+def cli_bootstrap_activate(
+    gateway_code: str = typer.Option("GW001", help="Gateway code to activate"),
+    station_id: int = typer.Option(1, help="Station ID bound to the registration token"),
+    registration_token: str = typer.Option(..., prompt=True, help="Short-lived registration token from server"),
+    server_base_url: str = typer.Option("http://127.0.0.1:18000", help="Server base URL without /api/v1"),
+    env_path: Path = typer.Option(Path(".env"), help="Local .env path to update"),
+    write_env: bool = typer.Option(True, help="Write activated configuration to .env and create .env.bak first"),
+):
+    _prepare_console()
+    setup_logging("INFO")
+    result = ServerClient.bootstrap_activate(
+        server_base_url,
+        {
+            "gateway_code": gateway_code,
+            "station_id": station_id,
+            "registration_token": registration_token,
+            "device_info": {"source": "gateway-cli", "version": "0.1.0"},
+        },
+    )
+    values = {
+        "GATEWAY_CODE": result["gateway_code"],
+        "GATEWAY_SECRET": result["gateway_secret"],
+        "STATION_ID": str(result["station_id"]),
+        "SERVER_BASE_URL": server_base_url.rstrip("/"),
+    }
+    if write_env:
+        _upsert_env_values(env_path, values)
+        typer.echo("网关注册成功。")
+        typer.echo(f"配置已写入 {env_path}，原文件已备份为 {env_path}.bak。")
+        typer.echo("GATEWAY_CODE=" + values["GATEWAY_CODE"])
+        typer.echo("GATEWAY_SECRET=********")
+        typer.echo("STATION_ID=" + values["STATION_ID"])
+        typer.echo("SERVER_BASE_URL=" + values["SERVER_BASE_URL"])
+        typer.echo("长期密钥已保存，请不要提交 .env 到 Git。")
+    else:
+        typer.echo("网关注册成功。请手动保存以下配置，长期密钥只显示这一次：")
+        typer.echo("GATEWAY_CODE=" + values["GATEWAY_CODE"])
+        typer.echo("GATEWAY_SECRET=" + values["GATEWAY_SECRET"])
+        typer.echo("STATION_ID=" + values["STATION_ID"])
+        typer.echo("SERVER_BASE_URL=" + values["SERVER_BASE_URL"])
 
 
 @app.command("heartbeat")

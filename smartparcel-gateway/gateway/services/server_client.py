@@ -34,6 +34,14 @@ class ServerClient:
     def health(self):
         return self._request("GET", "/api/v1/health")
 
+    @staticmethod
+    def bootstrap_activate(server_base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        url = f"{server_base_url.rstrip('/')}/api/v1/gateways/bootstrap/activate"
+        with httpx.Client(timeout=15.0, trust_env=False) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()
+
     def heartbeat(self):
         return self._request("POST", "/api/v1/gateways/heartbeat", {"gateway_code": self.settings.gateway_code, "status": "ONLINE"})
 

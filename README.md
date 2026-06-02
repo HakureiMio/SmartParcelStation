@@ -184,3 +184,19 @@ python -m gateway.main sync-push
 - `smartparcel-server/README.md`
 - `smartparcel-gateway/README.md`
 - `clip-node-nrf52810/README.md`
+
+## 网关短期注册凭证流程
+
+当前推荐的网关注册链路是：
+
+1. server 生成短期 `registration_token`。
+2. 网关管理员在手机端查看凭证；当前手机端暂未实现，先用 server 面板/API 返回值模拟。
+3. 管理员通过蓝牙或热点连接 ARM 网关；当前阶段先用 gateway CLI 模拟写入。
+4. gateway 调用 `/api/v1/gateways/bootstrap/activate` 激活注册。
+5. server 校验 token 后生成长期 `gateway_secret`。
+6. gateway 保存 `GATEWAY_CODE`、`GATEWAY_SECRET`、`STATION_ID`、`SERVER_BASE_URL` 到 `.env`。
+7. 后续 heartbeat / sync-push / sync-pull 使用长期 `gateway_secret` 做 HMAC-SHA256 签名。
+
+安全约束：短期 token 默认 10 分钟有效、只显示一次、数据库只保存 hash、使用后失效、可由管理员撤销；长期 `gateway_secret` 不能提交到 Git。
+
+详见：`smartparcel-server/README.md` 和 `smartparcel-gateway/README.md`。

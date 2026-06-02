@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     dev_auth_enabled: bool = True
     default_gateway_secret: str = 'dev-gateway-secret'
     gateway_signature_tolerance_seconds: int = 300
+    gateway_registration_token_ttl_seconds: int = 600
+    gateway_registration_token_bytes: int = 24
+    gateway_secret_bytes: int = 32
     admin_bootstrap_token: str = 'change-me-local-only'
     public_base_url: str = 'https://example.com'
 

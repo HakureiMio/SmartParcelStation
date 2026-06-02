@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import (
     EventSource,
+    GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
     ParcelOrigin,
@@ -67,6 +68,50 @@ class GatewayOut(ORMBase):
     station_id: int
     status: str
     last_seen_at: datetime | None
+
+
+class GatewayRegistrationTokenCreate(BaseModel):
+    gateway_code: str
+    station_id: int
+    ttl_seconds: int | None = None
+
+
+class GatewayRegistrationTokenCreateOut(BaseModel):
+    id: int
+    token_id: str
+    gateway_code: str
+    station_id: int
+    registration_token: str
+    expires_at: datetime
+    message: str
+
+
+class GatewayRegistrationTokenOut(ORMBase):
+    id: int
+    token_id: str
+    gateway_code: str
+    station_id: int
+    status: GatewayRegistrationTokenStatus
+    expires_at: datetime
+    used_at: datetime | None
+    created_by_admin_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class GatewayBootstrapActivateIn(BaseModel):
+    gateway_code: str
+    station_id: int
+    registration_token: str
+    device_info: dict[str, Any] = Field(default_factory=dict)
+
+
+class GatewayBootstrapActivateOut(BaseModel):
+    gateway_code: str
+    station_id: int
+    gateway_secret: str
+    server_base_url: str
+    message: str
 
 
 class UserCreate(BaseModel):

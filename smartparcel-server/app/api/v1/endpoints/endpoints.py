@@ -6,8 +6,13 @@ from app.core.security import get_current_gateway, get_current_server_admin, get
 from app.db.session import get_db
 from app.schemas.schemas import (
     GatewayEventIn,
+    GatewayBootstrapActivateIn,
+    GatewayBootstrapActivateOut,
     GatewayHeartbeatIn,
     GatewayOut,
+    GatewayRegistrationTokenCreate,
+    GatewayRegistrationTokenCreateOut,
+    GatewayRegistrationTokenOut,
     GatewayRegisterIn,
     GatewaySyncPullOut,
     HealthOut,
@@ -87,6 +92,58 @@ async def ensure_default_users(_: object = Depends(get_current_server_admin_or_b
 @router.post('/gateways/register', response_model=GatewayOut)
 async def register_gateway(payload: GatewayRegisterIn, _: object = Depends(get_current_server_admin_or_bootstrap), db: AsyncSession = Depends(get_db)):
     return await services.register_gateway(db, payload.model_dump())
+
+
+@router.post('/gateways/registration-tokens', response_model=GatewayRegistrationTokenCreateOut)
+async def create_gateway_registration_token(
+    payload: GatewayRegistrationTokenCreate,
+    current_user=Depends(get_current_server_admin_or_bootstrap),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_id = getattr(current_user, 'id', None)
+    row, plain_token = await services.create_gateway_registration_token(
+        db,
+        gateway_code=payload.gateway_code,
+        station_id=payload.station_id,
+        ttl_seconds=payload.ttl_seconds,
+        created_by_admin_id=admin_id,
+    )
+    return GatewayRegistrationTokenCreateOut(
+        id=row.id,
+        token_id=row.token_id,
+        gateway_code=row.gateway_code,
+        station_id=row.station_id,
+        registration_token=plain_token,
+        expires_at=row.expires_at,
+        message='请在有效期内通过管理员手机应用或网关本地配置界面写入该注册凭证。',
+    )
+
+
+@router.get('/gateways/registration-tokens', response_model=list[GatewayRegistrationTokenOut])
+async def list_gateway_registration_tokens(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
+    return await services.list_gateway_registration_tokens(db)
+
+
+@router.post('/gateways/registration-tokens/{token_id}/revoke', response_model=GatewayRegistrationTokenOut)
+async def revoke_gateway_registration_token(token_id: int, _: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
+    return await services.revoke_gateway_registration_token(db, token_id)
+
+
+@router.post('/gateways/bootstrap/activate', response_model=GatewayBootstrapActivateOut)
+async def activate_gateway_registration(payload: GatewayBootstrapActivateIn, db: AsyncSession = Depends(get_db)):
+    gateway, gateway_secret = await services.activate_gateway_registration(
+        db,
+        gateway_code=payload.gateway_code,
+        station_id=payload.station_id,
+        registration_token=payload.registration_token,
+    )
+    return GatewayBootstrapActivateOut(
+        gateway_code=gateway.gateway_code,
+        station_id=gateway.station_id,
+        gateway_secret=gateway_secret,
+        server_base_url=settings.public_base_url,
+        message='网关注册成功，请保存长期通信密钥。',
+    )
 
 
 @router.post('/gateways/heartbeat', response_model=GatewayOut)

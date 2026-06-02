@@ -14,4 +14,8 @@ def create_default_data(client: ApiClient, gateway_secret: str = DEFAULT_GATEWAY
             {'station_code': 'ST001', 'name': '主站点', 'address': '示例路 1 号', 'status': 'ACTIVE'},
             auth=True,
         )
-    client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'}, bootstrap=True)
+    client.post(
+        '/gateways/register',
+        {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'},
+        bootstrap=True,
+    )

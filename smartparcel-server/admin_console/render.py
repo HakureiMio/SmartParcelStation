@@ -40,6 +40,6 @@ def print_rows(rows: list[dict[str, Any]], columns: list[str], headers: dict[str
 
 def print_block(title: str, lines: list[str]) -> None:
     print(f'\n{title}')
-    print('-' * len(title))
+    print('-' * display_width(title))
     for line in lines:
         print(line)

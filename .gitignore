@@ -11,6 +11,7 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+.pytest-tmp/
 pytest-cache-files-*/
 **/pytest-cache-files-*/
 
@@ -40,10 +41,30 @@ pytest-cache-files-*/
 *.log
 logs/
 
-# IDE
-.vscode/
-.idea/
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# CMake / embedded build outputs
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.elf
+*.hex
+*.bin
+*.map
 
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Keep project documentation and migration sources trackable
+!requirements.txt
+!README.md
+!alembic/versions/*.py

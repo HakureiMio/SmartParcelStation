@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.enums import (
     EventSource,
+    GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
     ParcelOrigin,
@@ -71,6 +72,22 @@ class GatewayNonce(Base):
     nonce: Mapped[str] = mapped_column(String(128), nullable=False)
     timestamp: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GatewayRegistrationToken(Base, TimestampMixin):
+    __tablename__ = 'gateway_registration_tokens'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    gateway_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    station_id: Mapped[int] = mapped_column(ForeignKey('stations.id'), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[GatewayRegistrationTokenStatus] = mapped_column(
+        Enum(GatewayRegistrationTokenStatus), default=GatewayRegistrationTokenStatus.PENDING, nullable=False
+    )
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
 
 
 class Parcel(Base, TimestampMixin):
