@@ -164,6 +164,21 @@ python -m gateway.main sync-push
 - 自助扫码取件暂不实现，只做人工确认取件，并预留 `NFC_FAST` 等权限语义。
 - 标签真实管理在 gateway，server 只保存镜像与审计。
 
+## 公网 HTTPS 实验准备
+
+本地单机测试和局域网测试可以继续使用 `http://127.0.0.1:18000` 或局域网 IP。VPN/隧道测试是在受控网络中验证远程连通性。公网 HTTPS 测试建议使用域名 + Caddy/Nginx 反向代理 + FastAPI 本机端口。
+
+当前推荐的公网实验安全组合是 `HTTPS + HMAC 网关签名`：
+
+- HTTPS 解决传输加密和服务器身份认证。
+- HMAC 解决 gateway 身份认证和消息完整性。
+- `timestamp + nonce` 解决基础重放攻击。
+- MySQL 和 EMQX 不应直接暴露公网。
+- 每台 gateway 必须独立生成 `GATEWAY_SECRET`。
+- server 管理面板只建议在本机或受信网络使用。
+
+详细部署说明见 `smartparcel-server/docs/public_https_deployment.md`。
+
 ## 子项目文档
 
 - `smartparcel-server/README.md`

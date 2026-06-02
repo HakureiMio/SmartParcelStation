@@ -62,6 +62,17 @@ class Gateway(Base, TimestampMixin):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class GatewayNonce(Base):
+    __tablename__ = 'gateway_nonces'
+    __table_args__ = (UniqueConstraint('gateway_id', 'nonce', name='uq_gateway_nonces_gateway_nonce'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gateway_id: Mapped[int] = mapped_column(ForeignKey('gateways.id'), nullable=False)
+    nonce: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Parcel(Base, TimestampMixin):
     __tablename__ = 'parcels'
 

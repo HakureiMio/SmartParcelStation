@@ -4,7 +4,23 @@ import httpx
 
 from admin_console.api_client import ApiClient
 from admin_console.db_ops import create_default_data
-from admin_console.render import print_rows
+from admin_console.formatters import (
+    GATEWAY_COLUMNS,
+    NOTIFICATION_COLUMNS,
+    PARCEL_COLUMNS,
+    QUERY_COLUMNS,
+    STATION_COLUMNS,
+    SYNC_COLUMNS,
+    USER_COLUMNS,
+    format_gateway_result,
+    format_notification_result,
+    format_parcel_result,
+    format_query_result,
+    format_station_result,
+    format_system_status,
+    format_user_result,
+)
+from admin_console.render import print_block, print_rows
 
 
 def ask(prompt: str, default: str | None = None) -> str:
@@ -14,7 +30,19 @@ def ask(prompt: str, default: str | None = None) -> str:
 
 
 def pause() -> None:
-    input('\nPress Enter to continue...')
+    input('\n按 Enter 返回...')
+
+
+def print_http_error(exc: httpx.HTTPStatusError) -> None:
+    status_code = exc.response.status_code
+    detail = ''
+    try:
+        body = exc.response.json()
+        detail = body.get('detail', '')
+    except Exception:
+        detail = exc.response.text
+    suffix = f'，原因：{detail}' if detail else ''
+    print(f'操作失败：接口返回 {status_code}{suffix}')
 
 
 class Menu:
@@ -24,7 +52,7 @@ class Menu:
     def run(self) -> None:
         while True:
             print(
-                '\nSmartParcel Server Panel\n'
+                '\nSmartParcel 服务器终端面板\n'
                 '1 系统状态\n'
                 '2 用户管理\n'
                 '3 站点管理\n'
@@ -63,104 +91,118 @@ class Menu:
                     continue
                 else:
                     print('请输入有效数字，或输入 exit 退出。')
+            except httpx.HTTPStatusError as exc:
+                print_http_error(exc)
             except httpx.HTTPError as exc:
-                print(f'API 调用失败: {exc}')
+                print(f'操作失败：无法连接服务端或请求超时。{exc}')
             except Exception as exc:
-                print(f'操作失败: {exc}')
+                print(f'操作失败：{exc}')
 
     def system_status(self) -> None:
-        print(f'API_BASE_URL={self.client.api_base}')
-        print(self.client.get('/health'))
-        print(self.client.get('/version'))
+        lines = format_system_status(self.client.api_base, self.client.get('/health'), self.client.get('/version'))
+        print_block('系统状态', lines)
         pause()
 
     def user_menu(self) -> None:
         print('\n1 查看用户列表\n2 创建默认测试用户\n3 创建单个用户\n4 启用/禁用用户\n5 修改用户角色\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            print_rows(self.client.get('/users'), ['id', 'display_name', 'phone', 'role', 'is_active'])
+            print_rows(self.client.get('/users', auth=True), ['id', 'display_name', 'phone', 'role', 'is_active'], USER_COLUMNS)
         elif choice == '2':
-            print_rows(self.client.post('/dev/default-users'), ['id', 'display_name', 'phone', 'role', 'is_active'])
+            rows = self.client.post('/dev/default-users', bootstrap=True)
+            print('默认测试用户创建完成。')
+            print_rows(rows, ['id', 'display_name', 'phone', 'role', 'is_active'], USER_COLUMNS)
         elif choice == '3':
             payload = {
-                'display_name': ask('display_name'),
-                'phone': ask('phone', ''),
-                'role': ask('role', 'USER'),
-                'station_id': int(ask('station_id', '1')),
+                'display_name': ask('显示名称'),
+                'phone': ask('手机号', ''),
+                'role': ask('角色', 'USER'),
+                'station_id': int(ask('站点ID', '1')),
             }
-            print(self.client.post('/users', payload, auth=True))
+            user = self.client.post('/users', payload, auth=True)
+            print(format_user_result(user, '用户创建成功'))
         elif choice == '4':
-            user_id = ask('user_id')
-            is_active = ask('is_active true/false', 'true').lower() == 'true'
-            print(self.client.patch(f'/users/{user_id}', {'is_active': is_active}))
+            user_id = ask('用户ID')
+            is_active = ask('是否启用 true/false', 'true').lower() == 'true'
+            user = self.client.patch(f'/users/{user_id}', {'is_active': is_active})
+            action = '用户已启用' if is_active else '用户已禁用'
+            print(format_user_result(user, action))
         elif choice == '5':
-            user_id = ask('user_id')
-            print(self.client.patch(f'/users/{user_id}', {'role': ask('role', 'USER')}))
+            user_id = ask('用户ID')
+            user = self.client.patch(f'/users/{user_id}', {'role': ask('角色', 'USER')})
+            print(format_user_result(user, '用户角色已更新'))
         pause()
 
     def station_menu(self) -> None:
         print('\n1 查看站点\n2 创建默认站点 ST001\n3 创建站点\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            print_rows(self.client.get('/stations'), ['id', 'station_code', 'name', 'status'])
+            print_rows(self.client.get('/stations', auth=True), ['id', 'station_code', 'name', 'status'], STATION_COLUMNS)
         elif choice == '2':
-            print(self.client.post('/stations', {'station_code': 'ST001', 'name': '主站点', 'address': '示例路 1 号', 'status': 'ACTIVE'}, auth=True))
+            station = self.client.post('/stations', {'station_code': 'ST001', 'name': '主站点', 'address': '示例路 1 号', 'status': 'ACTIVE'}, auth=True)
+            print(format_station_result(station))
         elif choice == '3':
-            payload = {'station_code': ask('station_code'), 'name': ask('name'), 'address': ask('address'), 'status': ask('status', 'ACTIVE')}
-            print(self.client.post('/stations', payload, auth=True))
+            payload = {'station_code': ask('站点编码'), 'name': ask('站点名称'), 'address': ask('站点地址'), 'status': ask('状态', 'ACTIVE')}
+            station = self.client.post('/stations', payload, auth=True)
+            print(format_station_result(station))
         pause()
 
     def gateway_menu(self) -> None:
         print('\n1 查看网关\n2 注册默认网关 GW001\n3 查看网关心跳状态\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            print_rows(self.client.get('/gateways'), ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'])
+            print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         elif choice == '2':
-            print(self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': 'gw-secret-demo', 'status': 'ACTIVE'}))
+            gateway = self.client.post('/gateways/register', {'gateway_code': 'GW001', 'station_id': 1, 'device_secret_hash': 'gw-secret-demo', 'status': 'ACTIVE'}, bootstrap=True)
+            print(format_gateway_result(gateway))
         elif choice == '3':
-            print_rows(self.client.get('/gateways'), ['gateway_code', 'status', 'last_seen_at'])
+            print_rows(self.client.get('/gateways', auth=True), ['gateway_code', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         pause()
 
     def parcel_menu(self) -> None:
-        print('\n1 服务器手动预录入快递\n2 查看包裹列表\n3 按 parcel_code 查询\n0 返回')
+        print('\n1 服务器手动预录入快递\n2 查看包裹列表\n3 按快递号查询\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
             payload = {
-                'parcel_code': ask('parcel_code'),
-                'pickup_code': ask('pickup_code', ''),
-                'receiver_user_id': int(ask('receiver_user_id', '2')),
-                'receiver_phone': ask('receiver_phone', ''),
-                'receiver_name_masked': ask('receiver_name_masked', ''),
-                'station_id': int(ask('station_id', '1')),
+                'parcel_code': ask('快递号'),
+                'pickup_code': ask('取件码', ''),
+                'receiver_user_id': int(ask('收件用户ID', '2')),
+                'receiver_phone': ask('收件手机号', ''),
+                'receiver_name_masked': ask('收件人脱敏名称', ''),
+                'station_id': int(ask('站点ID', '1')),
             }
-            print(self.client.post('/parcels', payload, auth=True))
+            parcel = self.client.post('/parcels', payload, auth=True)
+            print(format_parcel_result(parcel, '快递预录入成功'))
         elif choice == '2':
-            print_rows(self.client.get('/parcels'), ['id', 'parcel_code', 'status', 'origin', 'sync_status'])
+            print_rows(self.client.get('/parcels', auth=True), ['id', 'parcel_code', 'status', 'origin', 'sync_status'], PARCEL_COLUMNS)
         elif choice == '3':
-            print(self.client.get(f"/parcels/by-code/{ask('parcel_code')}"))
+            parcel = self.client.get(f"/parcels/by-code/{ask('快递号')}", auth=True)
+            print(format_parcel_result(parcel, '查询到快递'))
         pause()
 
     def query_menu(self) -> None:
         print('\n1 按用户查看待取件\n2 查看通知记录\n3 标记通知已读\n4 按快递号/取件信息查询\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            print_rows(self.client.get(f"/users/{ask('user_id', '2')}/pickup-list"), ['id', 'parcel_code', 'status', 'origin'])
+            print_rows(self.client.get(f"/users/{ask('用户ID', '2')}/pickup-list"), ['id', 'parcel_code', 'status', 'origin'], PARCEL_COLUMNS)
         elif choice == '2':
-            print_rows(self.client.get('/notifications'), ['id', 'user_id', 'parcel_id', 'title', 'status'])
+            print_rows(self.client.get('/notifications', auth=True), ['id', 'user_id', 'parcel_id', 'title', 'status'], NOTIFICATION_COLUMNS)
         elif choice == '3':
-            print(self.client.post(f"/notifications/{ask('notification_id')}/read"))
+            notification = self.client.post(f"/notifications/{ask('通知ID')}/read", auth=True)
+            print(format_notification_result(notification))
         elif choice == '4':
-            key = ask('query string, example parcel_code=P001')
-            print(self.client.get(f'/parcel-query?{key}'))
+            key = ask('查询条件，例如 parcel_code=P001')
+            rows = format_query_result(self.client.get(f'/parcel-query?{key}'))
+            print_rows(rows, ['id', 'parcel_code', 'status', 'origin', 'receiver_phone_masked'], QUERY_COLUMNS)
         pause()
 
     def sync_menu(self) -> None:
-        print_rows(self.client.get('/sync-events'), ['id', 'event_type', 'direction', 'status', 'created_at'])
+        print_rows(self.client.get('/sync-events', auth=True), ['id', 'event_type', 'direction', 'status', 'created_at'], SYNC_COLUMNS)
         pause()
 
     def exception_menu(self) -> None:
-        rows = [row for row in self.client.get('/parcels') if row.get('status') in {'CONFLICT', 'EXCEPTION'} or row.get('sync_status') == 'CONFLICT']
-        print_rows(rows, ['id', 'parcel_code', 'status', 'sync_status'])
+        rows = [row for row in self.client.get('/parcels', auth=True) if row.get('status') in {'CONFLICT', 'EXCEPTION'} or row.get('sync_status') == 'CONFLICT']
+        print_rows(rows, ['id', 'parcel_code', 'status', 'sync_status'], PARCEL_COLUMNS)
         pause()
 
     def dev_menu(self) -> None:
@@ -168,9 +210,12 @@ class Menu:
         choice = input('> ').strip()
         if choice == '1':
             create_default_data(self.client)
-            print('default users, ST001 and GW001 checked')
+            print('默认测试数据初始化完成：默认用户、站点 ST001、网关 GW001 已检查。')
         elif choice == '2':
-            print_rows(self.client.get('/users'), ['id', 'display_name', 'role', 'is_active'])
-            print_rows(self.client.get('/stations'), ['id', 'station_code', 'status'])
-            print_rows(self.client.get('/gateways'), ['id', 'gateway_code', 'status'])
+            print('\n默认用户：')
+            print_rows(self.client.get('/users', auth=True), ['id', 'display_name', 'role', 'is_active'], USER_COLUMNS)
+            print('\n默认站点：')
+            print_rows(self.client.get('/stations', auth=True), ['id', 'station_code', 'status'], STATION_COLUMNS)
+            print('\n默认网关：')
+            print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'status'], GATEWAY_COLUMNS)
         pause()

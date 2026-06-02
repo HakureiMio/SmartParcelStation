@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 import httpx
 
 from gateway.core.config import Settings
-from gateway.core.security import build_gateway_headers
+from gateway.core.security import build_gateway_headers, serialize_json_body
 
 
 class ServerClient:
@@ -26,7 +25,7 @@ class ServerClient:
             if method.upper() == "GET":
                 resp = client.get(url, headers=headers)
             else:
-                resp = client.request(method, url, headers=headers, content=json.dumps(payload or {}))
+                resp = client.request(method, url, headers=headers, content=serialize_json_body(payload))
             resp.raise_for_status()
             if not resp.content:
                 return {}

@@ -28,8 +28,9 @@ def test_server_client_builds_gateway_headers(monkeypatch):
             captured.update(headers)
             return DummyResponse()
 
-    monkeypatch.setattr("httpx.Client", lambda timeout: DummyClient())
+    monkeypatch.setattr("httpx.Client", lambda timeout, trust_env=False: DummyClient())
     c.health()
 
     assert "X-Gateway-Code" in captured
+    assert "X-Gateway-Body-SHA256" in captured
     assert "X-Gateway-Signature" in captured

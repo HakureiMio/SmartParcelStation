@@ -168,6 +168,34 @@ python -m gateway.main sync-push
 
 现有流程继续保留：gateway 本地认证通过后创建 `TAG_WAKE` task，并调用 mock BLE 执行亮灯/蜂鸣。
 
+## 11. 公网 HTTPS 与 HMAC 签名
+
+公网实验时推荐把 `SERVER_BASE_URL` 改为 HTTPS 域名，例如：
+
+```env
+SERVER_BASE_URL=https://sps.example.com
+GATEWAY_CODE=GW001
+GATEWAY_SECRET=change-me-generate-random
+```
+
+每台 gateway 必须使用独立强随机 `GATEWAY_SECRET`。生成示例：
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+gateway 请求会自动附带：
+
+- `X-Gateway-Code`
+- `X-Gateway-Timestamp`
+- `X-Gateway-Nonce`
+- `X-Gateway-Body-SHA256`
+- `X-Gateway-Signature`
+
+签名原文为 `METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n" + BODY_SHA256`。JSON body 使用稳定序列化；GET 请求 body 为空。ARM 网关需要保持时间同步，建议启用 NTP / `systemd-timesyncd`。
+
+普通 HTTPS 用来验证服务器证书并加密传输；HMAC 用来证明 gateway 身份并保证消息完整性。mTLS 后续可选，本阶段不强制。
+
 ## 10. 与 smartparcel-server 接口约定
 
 已封装：

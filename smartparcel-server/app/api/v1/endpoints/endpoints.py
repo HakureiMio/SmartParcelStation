@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import get_current_user_dev, verify_gateway_request
+from app.core.security import get_current_gateway, get_current_server_admin, get_current_server_admin_or_bootstrap, get_current_user_dev, verify_gateway_request
 from app.db.session import get_db
 from app.schemas.schemas import (
     GatewayEventIn,
@@ -55,12 +55,12 @@ async def create_station(payload: StationCreate, _: object = Depends(get_current
 
 
 @router.get('/stations', response_model=list[StationOut])
-async def list_stations(db: AsyncSession = Depends(get_db)):
+async def list_stations(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_stations(db)
 
 
 @router.get('/stations/{station_id}', response_model=StationOut)
-async def get_station(station_id: int, db: AsyncSession = Depends(get_db)):
+async def get_station(station_id: int, _: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.get_station(db, station_id)
 
 
@@ -70,7 +70,7 @@ async def create_user(payload: UserCreate, _: object = Depends(get_current_user_
 
 
 @router.get('/users', response_model=list[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db)):
+async def list_users(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_users(db)
 
 
@@ -80,35 +80,57 @@ async def patch_user(user_id: int, payload: UserPatch, _: object = Depends(get_c
 
 
 @router.post('/dev/default-users', response_model=list[UserOut])
-async def ensure_default_users(db: AsyncSession = Depends(get_db)):
+async def ensure_default_users(_: object = Depends(get_current_server_admin_or_bootstrap), db: AsyncSession = Depends(get_db)):
     return await services.ensure_default_users(db)
 
 
 @router.post('/gateways/register', response_model=GatewayOut)
-async def register_gateway(payload: GatewayRegisterIn, db: AsyncSession = Depends(get_db)):
+async def register_gateway(payload: GatewayRegisterIn, _: object = Depends(get_current_server_admin_or_bootstrap), db: AsyncSession = Depends(get_db)):
     return await services.register_gateway(db, payload.model_dump())
 
 
 @router.post('/gateways/heartbeat', response_model=GatewayOut)
-async def gateway_heartbeat(payload: GatewayHeartbeatIn, db: AsyncSession = Depends(get_db)):
-    return await services.gateway_heartbeat(db, payload.gateway_code, payload.status)
+async def gateway_heartbeat(
+    payload: GatewayHeartbeatIn,
+    request: Request,
+    x_gateway_code: str | None = Header(default=None, alias='X-Gateway-Code'),
+    x_gateway_timestamp: str | None = Header(default=None, alias='X-Gateway-Timestamp'),
+    x_gateway_nonce: str | None = Header(default=None, alias='X-Gateway-Nonce'),
+    x_gateway_body_sha256: str | None = Header(default=None, alias='X-Gateway-Body-SHA256'),
+    x_gateway_signature: str | None = Header(default=None, alias='X-Gateway-Signature'),
+    db: AsyncSession = Depends(get_db),
+):
+    gateway = await verify_gateway_request(
+        request=request,
+        payload=await request.body(),
+        x_gateway_code=x_gateway_code,
+        x_gateway_timestamp=x_gateway_timestamp,
+        x_gateway_nonce=x_gateway_nonce,
+        x_gateway_body_sha256=x_gateway_body_sha256,
+        x_gateway_signature=x_gateway_signature,
+        db=db,
+        expected_gateway_code=payload.gateway_code,
+    )
+    return await services.gateway_heartbeat(db, gateway.gateway_code, payload.status)
 
 
 @router.get('/gateways', response_model=list[GatewayOut])
-async def list_gateways(db: AsyncSession = Depends(get_db)):
+async def list_gateways(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_gateways(db)
 
 
 @router.get('/gateways/{gateway_code}/sync/pull', response_model=GatewaySyncPullOut)
-async def gateway_pull_sync(gateway_code: str, db: AsyncSession = Depends(get_db)):
-    gateway = await services.get_gateway_by_code(db, gateway_code)
+async def gateway_pull_sync(gateway_code: str, gateway=Depends(get_current_gateway), db: AsyncSession = Depends(get_db)):
+    if gateway.gateway_code != gateway_code:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
     events = await services.gateway_pull_sync(db, gateway.id)
     return GatewaySyncPullOut(events=[{'id': e.id, 'event_id': e.event_id, 'event_type': e.event_type, 'payload_json': e.payload_json} for e in events])
 
 
 @router.post('/gateways/{gateway_code}/sync/push')
-async def gateway_push_sync(gateway_code: str, items: list[SyncPushItem], db: AsyncSession = Depends(get_db)):
-    gateway = await services.get_gateway_by_code(db, gateway_code)
+async def gateway_push_sync(gateway_code: str, items: list[SyncPushItem], gateway=Depends(get_current_gateway), db: AsyncSession = Depends(get_db)):
+    if gateway.gateway_code != gateway_code:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
     result = await services.gateway_push_sync(db, gateway.id, station_id=gateway.station_id, items=[i.model_dump() for i in items])
     return result
 
@@ -119,18 +141,23 @@ async def gateway_events(
     payload: GatewayEventIn,
     request: Request,
     x_gateway_code: str | None = Header(default=None, alias='X-Gateway-Code'),
+    x_gateway_timestamp: str | None = Header(default=None, alias='X-Gateway-Timestamp'),
+    x_gateway_nonce: str | None = Header(default=None, alias='X-Gateway-Nonce'),
+    x_gateway_body_sha256: str | None = Header(default=None, alias='X-Gateway-Body-SHA256'),
     x_gateway_signature: str | None = Header(default=None, alias='X-Gateway-Signature'),
     db: AsyncSession = Depends(get_db),
 ):
     gateway = await verify_gateway_request(
-        payload=(await request.body()),
+        request=request,
+        payload=await request.body(),
         x_gateway_code=x_gateway_code,
+        x_gateway_timestamp=x_gateway_timestamp,
+        x_gateway_nonce=x_gateway_nonce,
+        x_gateway_body_sha256=x_gateway_body_sha256,
         x_gateway_signature=x_gateway_signature,
         db=db,
-        fallback_secret=settings.default_gateway_secret,
+        expected_gateway_code=gateway_code,
     )
-    if gateway.gateway_code != gateway_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='gateway code mismatch between path and headers')
     return await services.create_gateway_event(
         db,
         gateway_id=gateway.id,
@@ -147,12 +174,12 @@ async def create_parcel(payload: ParcelCreate, current_user=Depends(get_current_
 
 
 @router.get('/parcels', response_model=list[ParcelOut])
-async def list_parcels(db: AsyncSession = Depends(get_db)):
+async def list_parcels(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_parcels(db)
 
 
 @router.get('/parcels/by-code/{parcel_code}', response_model=ParcelOut)
-async def get_parcel_by_code(parcel_code: str, db: AsyncSession = Depends(get_db)):
+async def get_parcel_by_code(parcel_code: str, _: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.get_parcel_by_code(db, parcel_code)
 
 
@@ -168,7 +195,7 @@ async def query_parcels(
 
 
 @router.get('/parcels/{parcel_id}', response_model=ParcelOut)
-async def get_parcel(parcel_id: int, db: AsyncSession = Depends(get_db)):
+async def get_parcel(parcel_id: int, _: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.get_parcel(db, parcel_id)
 
 
@@ -236,7 +263,7 @@ async def user_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get('/notifications', response_model=list[NotificationOut])
-async def list_notifications(db: AsyncSession = Depends(get_db)):
+async def list_notifications(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_notifications(db)
 
 
@@ -245,12 +272,13 @@ async def list_sync_events(
     direction: SyncDirection | None = None,
     status_value: SyncStatus | None = None,
     event_type: str | None = None,
+    _: object = Depends(get_current_server_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return await services.list_sync_events(db, direction=direction, status_value=status_value, event_type=event_type)
 
 
 @router.post('/notifications/{notification_id}/read', response_model=NotificationOut)
-async def read_notification(notification_id: int, db: AsyncSession = Depends(get_db)):
+async def read_notification(notification_id: int, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
     return await services.mark_notification_read(db, notification_id)
 

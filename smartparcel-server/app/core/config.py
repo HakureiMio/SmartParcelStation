@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     dev_auth_enabled: bool = True
     default_gateway_secret: str = 'dev-gateway-secret'
+    gateway_signature_tolerance_seconds: int = 300
+    admin_bootstrap_token: str = 'change-me-local-only'
+    public_base_url: str = 'https://example.com'
 
     mqtt_enabled: bool = True
     mqtt_host: str = '127.0.0.1'
