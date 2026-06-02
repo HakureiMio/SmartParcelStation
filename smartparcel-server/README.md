@@ -134,7 +134,76 @@ MQTT Topic 约定：
 - 订阅事件：`gateway/{gateway_code}/events`
 - 订阅状态：`gateway/{gateway_code}/status`
 
-## 10. 后续迁移到公网服务器需修改的配置项
+## 10. 阶段 A：server 侧 mock 闭环流程
+
+当前阶段快递公司上传用“服务器手动预录入快递”代替；微信小程序前端暂不实现，只保留账号角色和接口职责。server 负责中心记录、通知占位和同步审计，不直接控制标签亮灯/蜂鸣。
+
+### 10.1 启动依赖和 API
+
+```powershell
+cd smartparcel-server
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+docker compose up -d mysql emqx
+python -m alembic upgrade head
+uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload
+```
+
+### 10.2 打开服务器终端面板
+
+```powershell
+cd smartparcel-server
+.\.venv\Scripts\activate
+python -m admin_console.main
+```
+
+面板包含：
+
+- 系统状态：`health`、`version`、当前 `API_BASE_URL`。
+- 用户管理：查看用户、创建默认测试用户、创建用户、启停用户、修改角色。
+- 站点管理：查看站点、创建默认站点 `ST001`、创建站点。
+- 网关管理：查看网关、注册默认网关 `GW001`、查看心跳状态。
+- 中心包裹记录：手动预录入快递、查看包裹、按 `parcel_code` 查询、查看 `origin` 和 `business_status`。
+- 用户查询与通知记录：查看待取件、通知记录、标记已读。
+- 同步事件审计：查看 `gateway_sync_events`。
+- 异常处理：查看 `EXCEPTION` / `CONFLICT`。
+- 开发测试工具：一键创建默认用户、站点、网关。
+
+### 10.3 新增 API 能力
+
+- `POST /api/v1/dev/default-users`：创建默认测试用户。
+- `GET /api/v1/users`、`POST /api/v1/users`、`PATCH /api/v1/users/{user_id}`：开发阶段用户管理。
+- `GET /api/v1/gateways`：查看网关和心跳时间。
+- `GET /api/v1/parcels/by-code/{parcel_code}`：按快递号查询中心包裹。
+- `GET /api/v1/parcel-query`：按 `user_id`、`parcel_code`、`receiver_phone`、`pickup_code` 查询，返回脱敏字段。
+- `GET /api/v1/notifications`：查看通知记录。
+- `GET /api/v1/sync-events`：查看同步事件审计。
+
+### 10.4 gateway sync-push 事件处理
+
+server 收到以下事件时会落业务：
+
+- `GATEWAY_INBOUND` / `PARCEL_ARRIVED` / `INBOUND_PARCEL`：按 `parcel_code` 合并预录入包裹，或新建 `GATEWAY_INBOUND` 来源包裹。
+- `TAG_BOUND` / `TAG_RELEASED` / `TAG_STATUS_REPORT`：保存标签和绑定关系镜像，不直接控制标签。
+- `PICKUP_CONFIRMED` / `OFFLINE_PICKUP`：更新包裹为 `PICKED_UP`，记录 pickup event。
+
+### 10.5 数据库迁移
+
+本阶段新增迁移：
+
+- `alembic/versions/0002_sps_stage_a_flow.py`
+
+迁移内容：
+
+- 扩展 `UserRole`：新增 `STAFF`、`GATEWAY_ADMIN`。
+- 扩展 `ParcelStatus`：新增 `PRE_REGISTERED`、`ARRIVED_AT_STATION`、`FINDING`、`PICKUP_VERIFYING`。
+- `users` 新增 `pickup_level`、`trusted_pickup_enabled`。
+- `parcels` 新增 `receiver_name_masked`、`origin`、`sync_status`。
+- `parcels.created_by_admin_id` 允许为空，用于表示 gateway 入站产生的包裹不是由人工管理员直接创建。
+
+## 11. 后续迁移到公网服务器需修改的配置项
 
 从局域网迁移到公网时建议至少完成以下调整：
 

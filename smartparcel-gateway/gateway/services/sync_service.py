@@ -49,8 +49,11 @@ class SyncService:
                     pickup_code=p.get("pickup_code"),
                     receiver_user_id=p.get("receiver_user_id"),
                     receiver_phone=p.get("receiver_phone"),
+                    receiver_name_masked=p.get("receiver_name_masked"),
                     station_id=p.get("station_id", self.station_id),
                     status=p.get("status", "CREATED"),
+                    origin=p.get("origin", "SERVER_MANUAL"),
+                    sync_status=p.get("sync_status", "SYNCED"),
                 )
                 self.db.add(obj)
             else:
@@ -58,6 +61,9 @@ class SyncService:
                 obj.pickup_code = p.get("pickup_code")
                 obj.receiver_user_id = p.get("receiver_user_id")
                 obj.receiver_phone = p.get("receiver_phone")
+                obj.receiver_name_masked = p.get("receiver_name_masked")
+                obj.origin = p.get("origin", obj.origin)
+                obj.sync_status = p.get("sync_status", obj.sync_status)
                 obj.local_updated_at = datetime.utcnow()
         for t in data.get("tags", []):
             obj = self.db.scalar(select(LocalTag).where(LocalTag.tag_id == t["tag_id"]))

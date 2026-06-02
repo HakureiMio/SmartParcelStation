@@ -8,7 +8,9 @@ from app.models.enums import (
     EventSource,
     NotificationStatus,
     NotificationType,
+    ParcelOrigin,
     ParcelStatus,
+    ParcelSyncStatus,
     ParcelTagBindingStatus,
     PickupEventType,
     SyncDirection,
@@ -34,6 +36,8 @@ class User(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER, nullable=False)
     station_id: Mapped[int | None] = mapped_column(ForeignKey('stations.id'), nullable=True)
+    pickup_level: Mapped[str] = mapped_column(String(32), default='NORMAL', nullable=False)
+    trusted_pickup_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -66,9 +70,12 @@ class Parcel(Base, TimestampMixin):
     pickup_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     receiver_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
     receiver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    receiver_name_masked: Mapped[str | None] = mapped_column(String(128), nullable=True)
     station_id: Mapped[int] = mapped_column(ForeignKey('stations.id'), nullable=False)
     status: Mapped[ParcelStatus] = mapped_column(Enum(ParcelStatus), default=ParcelStatus.CREATED, nullable=False)
-    created_by_admin_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    origin: Mapped[ParcelOrigin] = mapped_column(Enum(ParcelOrigin), default=ParcelOrigin.SERVER_MANUAL, nullable=False)
+    sync_status: Mapped[ParcelSyncStatus] = mapped_column(Enum(ParcelSyncStatus), default=ParcelSyncStatus.SERVER_ONLY, nullable=False)
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
 
 
 class Tag(Base, TimestampMixin):

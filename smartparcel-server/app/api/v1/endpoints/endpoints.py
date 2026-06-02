@@ -21,14 +21,19 @@ from app.schemas.schemas import (
     StationCreate,
     StationOut,
     SyncPushItem,
+    GatewaySyncEventOut,
     TagBindIn,
     TagCreate,
     TagOut,
     TagReleaseIn,
     TagStatusReportIn,
+    UserCreate,
+    UserOut,
+    UserPatch,
     VersionOut,
 )
 from app.services import services
+from app.models.enums import SyncDirection, SyncStatus
 
 router = APIRouter()
 settings = get_settings()
@@ -59,6 +64,26 @@ async def get_station(station_id: int, db: AsyncSession = Depends(get_db)):
     return await services.get_station(db, station_id)
 
 
+@router.post('/users', response_model=UserOut)
+async def create_user(payload: UserCreate, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
+    return await services.create_user(db, payload.model_dump())
+
+
+@router.get('/users', response_model=list[UserOut])
+async def list_users(db: AsyncSession = Depends(get_db)):
+    return await services.list_users(db)
+
+
+@router.patch('/users/{user_id}', response_model=UserOut)
+async def patch_user(user_id: int, payload: UserPatch, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
+    return await services.patch_user(db, user_id, payload.model_dump(exclude_unset=True))
+
+
+@router.post('/dev/default-users', response_model=list[UserOut])
+async def ensure_default_users(db: AsyncSession = Depends(get_db)):
+    return await services.ensure_default_users(db)
+
+
 @router.post('/gateways/register', response_model=GatewayOut)
 async def register_gateway(payload: GatewayRegisterIn, db: AsyncSession = Depends(get_db)):
     return await services.register_gateway(db, payload.model_dump())
@@ -67,6 +92,11 @@ async def register_gateway(payload: GatewayRegisterIn, db: AsyncSession = Depend
 @router.post('/gateways/heartbeat', response_model=GatewayOut)
 async def gateway_heartbeat(payload: GatewayHeartbeatIn, db: AsyncSession = Depends(get_db)):
     return await services.gateway_heartbeat(db, payload.gateway_code, payload.status)
+
+
+@router.get('/gateways', response_model=list[GatewayOut])
+async def list_gateways(db: AsyncSession = Depends(get_db)):
+    return await services.list_gateways(db)
 
 
 @router.get('/gateways/{gateway_code}/sync/pull', response_model=GatewaySyncPullOut)
@@ -119,6 +149,22 @@ async def create_parcel(payload: ParcelCreate, current_user=Depends(get_current_
 @router.get('/parcels', response_model=list[ParcelOut])
 async def list_parcels(db: AsyncSession = Depends(get_db)):
     return await services.list_parcels(db)
+
+
+@router.get('/parcels/by-code/{parcel_code}', response_model=ParcelOut)
+async def get_parcel_by_code(parcel_code: str, db: AsyncSession = Depends(get_db)):
+    return await services.get_parcel_by_code(db, parcel_code)
+
+
+@router.get('/parcel-query')
+async def query_parcels(
+    user_id: int | None = None,
+    parcel_code: str | None = None,
+    receiver_phone: str | None = None,
+    pickup_code: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.query_parcels(db, user_id=user_id, parcel_code=parcel_code, receiver_phone=receiver_phone, pickup_code=pickup_code)
 
 
 @router.get('/parcels/{parcel_id}', response_model=ParcelOut)
@@ -187,6 +233,21 @@ async def user_pickup_history(user_id: int, db: AsyncSession = Depends(get_db)):
 @router.get('/users/{user_id}/notifications', response_model=list[NotificationOut])
 async def user_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
     return await services.list_user_notifications(db, user_id)
+
+
+@router.get('/notifications', response_model=list[NotificationOut])
+async def list_notifications(db: AsyncSession = Depends(get_db)):
+    return await services.list_notifications(db)
+
+
+@router.get('/sync-events', response_model=list[GatewaySyncEventOut])
+async def list_sync_events(
+    direction: SyncDirection | None = None,
+    status_value: SyncStatus | None = None,
+    event_type: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await services.list_sync_events(db, direction=direction, status_value=status_value, event_type=event_type)
 
 
 @router.post('/notifications/{notification_id}/read', response_model=NotificationOut)

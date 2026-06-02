@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 import time
 from sqlalchemy import select
 import typer
@@ -9,7 +10,7 @@ from gateway.core.config import get_settings
 from gateway.core.logging import setup_logging
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
-from gateway.models.entities import LocalParcel, LocalTag
+from gateway.models.entities import BindingStatus, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType
 from gateway.mqtt.client import GatewayMqttClient
 from gateway.mqtt.handlers import handle_server_command
 from gateway.services.heartbeat_service import HeartbeatService
@@ -67,6 +68,144 @@ def cli_sync_push():
     try:
         count = SyncService(db, ServerClient(settings), settings.station_id).sync_push_once()
         typer.echo(f"sync push sent: {count}")
+    finally:
+        db.close()
+
+
+@app.command("inbound-parcel")
+def cli_inbound_parcel(
+    parcel_code: str = typer.Option(..., prompt=True),
+    receiver_phone: str = typer.Option(..., prompt=True),
+    pickup_code: str | None = typer.Option(None),
+    receiver_user_id: str | None = typer.Option(None),
+    receiver_name_masked: str | None = typer.Option(None),
+):
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        parcel = db.scalar(select(LocalParcel).where(LocalParcel.parcel_code == parcel_code))
+        if parcel is None:
+            parcel = LocalParcel(
+                server_parcel_id=parcel_code,
+                parcel_code=parcel_code,
+                pickup_code=pickup_code,
+                receiver_user_id=receiver_user_id,
+                receiver_phone=receiver_phone,
+                receiver_name_masked=receiver_name_masked,
+                station_id=settings.station_id,
+                status=ParcelStatus.WAITING_PICKUP,
+                origin="GATEWAY_INBOUND",
+                sync_status="SYNC_PENDING",
+            )
+            db.add(parcel)
+        else:
+            parcel.pickup_code = pickup_code or parcel.pickup_code
+            parcel.receiver_user_id = receiver_user_id or parcel.receiver_user_id
+            parcel.receiver_phone = receiver_phone
+            parcel.receiver_name_masked = receiver_name_masked or parcel.receiver_name_masked
+            parcel.status = ParcelStatus.WAITING_PICKUP
+            parcel.origin = "GATEWAY_INBOUND"
+            parcel.sync_status = "SYNC_PENDING"
+        db.commit()
+        SyncService(db, ServerClient(settings), settings.station_id).enqueue_event_upload(
+            {
+                "event_id": uuid.uuid4().hex,
+                "event_type": "GATEWAY_INBOUND",
+                "payload_json": {
+                    "parcel_code": parcel_code,
+                    "receiver_phone": receiver_phone,
+                    "pickup_code": pickup_code,
+                    "receiver_user_id": receiver_user_id,
+                    "receiver_name_masked": receiver_name_masked,
+                    "station_id": settings.station_id,
+                },
+            }
+        )
+        typer.echo(f"inbound parcel queued: {parcel_code}")
+    finally:
+        db.close()
+
+
+@app.command("bind-tag")
+def cli_bind_tag(
+    parcel_code: str = typer.Option(..., prompt=True),
+    tag_id: str = typer.Option(..., prompt=True),
+    encrypted_token: str = typer.Option("", help="Mock tag token"),
+):
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        parcel = db.scalar(select(LocalParcel).where(LocalParcel.parcel_code == parcel_code))
+        if parcel is None:
+            raise typer.BadParameter(f"parcel not found: {parcel_code}")
+        tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+        if tag is None:
+            tag = LocalTag(tag_id=tag_id, encrypted_token=encrypted_token, station_id=settings.station_id)
+            db.add(tag)
+            db.commit()
+        binding_id = uuid.uuid4().hex
+        binding = LocalParcelTagBinding(
+            pickup_binding_id=binding_id,
+            server_parcel_id=parcel.server_parcel_id,
+            tag_id=tag_id,
+            station_id=settings.station_id,
+            status=BindingStatus.ACTIVE,
+        )
+        db.add(binding)
+        db.commit()
+        SyncService(db, ServerClient(settings), settings.station_id).enqueue_event_upload(
+            {
+                "event_id": uuid.uuid4().hex,
+                "event_type": "TAG_BOUND",
+                "payload_json": {
+                    "parcel_code": parcel_code,
+                    "tag_id": tag_id,
+                    "encrypted_token": encrypted_token,
+                    "pickup_binding_id": binding_id,
+                    "station_id": settings.station_id,
+                },
+            }
+        )
+        typer.echo(f"tag bound and queued: {parcel_code} -> {tag_id}")
+    finally:
+        db.close()
+
+
+@app.command("confirm-pickup")
+def cli_confirm_pickup(
+    parcel_code: str = typer.Option(..., prompt=True),
+    receiver_phone: str | None = typer.Option(None),
+    pickup_code: str | None = typer.Option(None),
+):
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        parcel = db.scalar(select(LocalParcel).where(LocalParcel.parcel_code == parcel_code))
+        if parcel is None:
+            raise typer.BadParameter(f"parcel not found: {parcel_code}")
+        if receiver_phone and parcel.receiver_phone and receiver_phone != parcel.receiver_phone:
+            raise typer.BadParameter("receiver_phone does not match local parcel")
+        if pickup_code and parcel.pickup_code and pickup_code != parcel.pickup_code:
+            raise typer.BadParameter("pickup_code does not match local parcel")
+        parcel.status = ParcelStatus.PICKED_UP
+        parcel.sync_status = "SYNC_PENDING"
+        service = SyncService(db, ServerClient(settings), settings.station_id)
+        event = service.create_pickup_event(
+            PickupEventType.OFFLINE_PICKUP,
+            {
+                "parcel_code": parcel_code,
+                "server_parcel_id": parcel.server_parcel_id,
+                "receiver_phone_confirmed": bool(receiver_phone),
+                "pickup_code_confirmed": bool(pickup_code),
+            },
+            server_parcel_id=parcel.server_parcel_id,
+            user_id=parcel.receiver_user_id,
+        )
+        db.commit()
+        typer.echo(f"pickup confirmed and queued: {event.event_id}")
     finally:
         db.close()
 

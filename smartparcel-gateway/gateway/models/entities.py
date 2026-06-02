@@ -15,8 +15,12 @@ def utcnow() -> datetime:
 
 class ParcelStatus(str, enum.Enum):
     CREATED = "CREATED"
+    PRE_REGISTERED = "PRE_REGISTERED"
+    ARRIVED_AT_STATION = "ARRIVED_AT_STATION"
     STORED = "STORED"
     WAITING_PICKUP = "WAITING_PICKUP"
+    FINDING = "FINDING"
+    PICKUP_VERIFYING = "PICKUP_VERIFYING"
     PICKED_UP = "PICKED_UP"
     EXCEPTION = "EXCEPTION"
     CANCELLED = "CANCELLED"
@@ -116,6 +120,9 @@ class LocalParcel(Base):
     pickup_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     receiver_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     receiver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    receiver_name_masked: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    origin: Mapped[str] = mapped_column(String(64), default="LOCAL_ONLY")
+    sync_status: Mapped[str] = mapped_column(String(64), default="LOCAL_ONLY")
     station_id: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[ParcelStatus] = mapped_column(Enum(ParcelStatus), default=ParcelStatus.CREATED)
     server_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

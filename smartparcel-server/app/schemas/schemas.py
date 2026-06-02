@@ -7,7 +7,9 @@ from app.models.enums import (
     EventSource,
     NotificationStatus,
     NotificationType,
+    ParcelOrigin,
     ParcelStatus,
+    ParcelSyncStatus,
     ParcelTagBindingStatus,
     PickupEventType,
     SyncDirection,
@@ -67,12 +69,51 @@ class GatewayOut(ORMBase):
     last_seen_at: datetime | None
 
 
+class UserCreate(BaseModel):
+    display_name: str
+    phone: str | None = None
+    openid: str | None = None
+    role: UserRole = UserRole.USER
+    station_id: int | None = None
+    pickup_level: str = 'NORMAL'
+    trusted_pickup_enabled: bool = False
+    is_active: bool = True
+
+
+class UserPatch(BaseModel):
+    display_name: str | None = None
+    phone: str | None = None
+    role: UserRole | None = None
+    station_id: int | None = None
+    pickup_level: str | None = None
+    trusted_pickup_enabled: bool | None = None
+    is_active: bool | None = None
+
+
+class UserOut(ORMBase):
+    id: int
+    openid: str | None
+    phone: str | None
+    display_name: str
+    role: UserRole
+    station_id: int | None
+    pickup_level: str
+    trusted_pickup_enabled: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class ParcelCreate(BaseModel):
     parcel_code: str
     pickup_code: str | None = None
     receiver_user_id: int | None = None
     receiver_phone: str | None = None
+    receiver_name_masked: str | None = None
     station_id: int
+    status: ParcelStatus = ParcelStatus.PRE_REGISTERED
+    origin: ParcelOrigin = ParcelOrigin.SERVER_MANUAL
+    sync_status: ParcelSyncStatus = ParcelSyncStatus.SERVER_ONLY
 
 
 class ParcelStatusPatch(BaseModel):
@@ -85,11 +126,27 @@ class ParcelOut(ORMBase):
     pickup_code: str | None
     receiver_user_id: int | None
     receiver_phone: str | None
+    receiver_name_masked: str | None
     station_id: int
     status: ParcelStatus
-    created_by_admin_id: int
+    origin: ParcelOrigin
+    sync_status: ParcelSyncStatus
+    created_by_admin_id: int | None
     created_at: datetime
     updated_at: datetime
+
+
+class ParcelQueryOut(BaseModel):
+    id: int
+    parcel_code: str
+    pickup_code: str | None
+    receiver_user_id: int | None
+    receiver_phone_masked: str | None
+    receiver_name_masked: str | None
+    station_id: int
+    status: ParcelStatus
+    origin: ParcelOrigin
+    sync_status: ParcelSyncStatus
 
 
 class TagCreate(BaseModel):

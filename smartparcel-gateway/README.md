@@ -101,6 +101,73 @@ python -m gateway.main sync-pull
 python -m gateway.main sync-push
 ```
 
+## 10. 阶段 A：gateway 侧 mock 闭环流程
+
+当前阶段条形码扫描用工作人员手动输入代替；自助扫码取件暂不实现，只做人工确认取件和 NFC_FAST 结构预留。标签真实管理在 gateway，server 只保存镜像和审计。
+
+### 10.1 初始化 gateway
+
+```powershell
+cd smartparcel-gateway
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+`.env` 示例：
+
+```env
+GATEWAY_CODE=GW001
+GATEWAY_SECRET=gw-secret-demo
+STATION_ID=1
+SERVER_BASE_URL=http://127.0.0.1:18000
+```
+
+执行：
+
+```powershell
+python -m gateway.main init-db
+python -m gateway.main health
+python -m gateway.main heartbeat
+```
+
+### 10.2 模拟快递实到入站
+
+```powershell
+python -m gateway.main inbound-parcel --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --receiver-user-id 2 --receiver-name-masked "张*"
+python -m gateway.main sync-push
+```
+
+该命令会写入本地 `local_parcels`，并加入 `sync_queue`。上传事件类型为 `GATEWAY_INBOUND`。server 收到后会按 `parcel_code` 匹配预录入包裹，匹配成功则更新为待取件，匹配失败则新建来源为 `GATEWAY_INBOUND` 的中心包裹。
+
+### 10.3 模拟本地标签绑定
+
+```powershell
+python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001 --encrypted-token mock-token
+python -m gateway.main sync-push
+```
+
+该命令会写入本地 `local_tags` 和 `local_parcel_tag_bindings`，并上传 `TAG_BOUND`。server 只保存标签绑定镜像，不作为正式标签控制入口。
+
+### 10.4 模拟人工确认取件
+
+```powershell
+python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456
+python -m gateway.main sync-push
+```
+
+gateway 本地核对快递号、手机号或取件码，成功后生成 pickup event。server 收到 `OFFLINE_PICKUP` / `PICKUP_CONFIRMED` 类事件后更新包裹为 `PICKED_UP`。
+
+### 10.5 保留 mock NFC / 寻物流程
+
+```powershell
+python -m gateway.main mock-nfc CARD_UID
+python -m gateway.main sync-push
+```
+
+现有流程继续保留：gateway 本地认证通过后创建 `TAG_WAKE` task，并调用 mock BLE 执行亮灯/蜂鸣。
+
 ## 10. 与 smartparcel-server 接口约定
 
 已封装：
@@ -125,6 +192,9 @@ python -m gateway.main sync-push
 - `python -m gateway.main sync-pull`
 - `python -m gateway.main sync-push`
 - `python -m gateway.main heartbeat`
+- `python -m gateway.main inbound-parcel`
+- `python -m gateway.main bind-tag`
+- `python -m gateway.main confirm-pickup`
 - `python -m gateway.main run`
 - `python -m gateway.main mock-nfc CARD_UID`
 - `python -m gateway.main list-parcels`
