@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+from datetime import datetime, timezone
 from typing import Any
+
+DEFAULT_GATEWAY_HEARTBEAT_TIMEOUT_SECONDS = 120
 
 
 USER_COLUMNS = {
@@ -90,6 +94,42 @@ def format_station_result(station: dict[str, Any]) -> str:
 
 def format_gateway_result(gateway: dict[str, Any]) -> str:
     return f"网关注册成功：{gateway.get('gateway_code', '-')}，当前状态：{gateway.get('status', '-')}"
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def gateway_display_status(gateway: dict[str, Any], timeout_seconds: int | None = None) -> str:
+    timeout = timeout_seconds or int(os.getenv('GATEWAY_HEARTBEAT_TIMEOUT_SECONDS', DEFAULT_GATEWAY_HEARTBEAT_TIMEOUT_SECONDS))
+    raw_status = str(gateway.get('status') or '-')
+    last_seen_at = parse_datetime(gateway.get('last_seen_at'))
+    if not last_seen_at:
+        return '未连接' if raw_status in {'ACTIVE', 'ONLINE'} else raw_status
+    age_seconds = (datetime.now(timezone.utc) - last_seen_at).total_seconds()
+    if raw_status == 'ONLINE':
+        return '在线' if age_seconds <= timeout else '离线（心跳超时）'
+    if raw_status == 'ACTIVE':
+        return '已注册（未心跳）'
+    return raw_status
+
+
+def format_gateway_rows(rows: list[dict[str, Any]], timeout_seconds: int | None = None) -> list[dict[str, Any]]:
+    return [{**row, 'status': gateway_display_status(row, timeout_seconds)} for row in rows]
 
 
 def format_gateway_token_result(token: dict[str, Any]) -> list[str]:

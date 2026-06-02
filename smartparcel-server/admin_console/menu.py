@@ -14,6 +14,7 @@ from admin_console.formatters import (
     SYNC_COLUMNS,
     USER_COLUMNS,
     format_gateway_result,
+    format_gateway_rows,
     format_gateway_token_result,
     format_notification_result,
     format_parcel_result,
@@ -155,7 +156,8 @@ class Menu:
         print('\n网关管理\n1 查看网关\n2 创建网关短期注册凭证\n3 查看网关注册凭证\n4 撤销网关注册凭证\n5 查看网关心跳状态\n0 返回')
         choice = input('> ').strip()
         if choice == '1':
-            print_rows(self.client.get('/gateways', auth=True), ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
+            rows = format_gateway_rows(self.client.get('/gateways', auth=True))
+            print_rows(rows, ['id', 'gateway_code', 'station_id', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         elif choice == '2':
             payload = {
                 'gateway_code': ask('网关编码', 'GW001'),
@@ -172,7 +174,8 @@ class Menu:
             token = self.client.post(f'/gateways/registration-tokens/{token_id}/revoke', auth=True)
             print(f"注册凭证已撤销：{token.get('id', '-')} / {token.get('gateway_code', '-')} / {token.get('status', '-')}")
         elif choice == '5':
-            print_rows(self.client.get('/gateways', auth=True), ['gateway_code', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
+            rows = format_gateway_rows(self.client.get('/gateways', auth=True))
+            print_rows(rows, ['gateway_code', 'status', 'last_seen_at'], GATEWAY_COLUMNS)
         pause()
 
     def parcel_menu(self) -> None:
