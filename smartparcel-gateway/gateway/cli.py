@@ -8,6 +8,7 @@ from loguru import logger
 
 from gateway.core.config import get_settings
 from gateway.core.logging import setup_logging
+from gateway.console import setup_utf8_console
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
 from gateway.models.entities import BindingStatus, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType
@@ -24,8 +25,13 @@ from gateway.services.task_service import TaskService
 app = typer.Typer(help="SmartParcel Local Gateway CLI")
 
 
+def _prepare_console() -> None:
+    setup_utf8_console()
+
+
 @app.command("init-db")
 def cli_init_db():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     init_db()
@@ -34,6 +40,7 @@ def cli_init_db():
 
 @app.command("health")
 def cli_health():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     client = ServerClient(settings)
@@ -42,6 +49,7 @@ def cli_health():
 
 @app.command("heartbeat")
 def cli_heartbeat():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     client = ServerClient(settings)
@@ -50,6 +58,7 @@ def cli_heartbeat():
 
 @app.command("sync-pull")
 def cli_sync_pull():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -62,6 +71,7 @@ def cli_sync_pull():
 
 @app.command("sync-push")
 def cli_sync_push():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -80,6 +90,7 @@ def cli_inbound_parcel(
     receiver_user_id: str | None = typer.Option(None),
     receiver_name_masked: str | None = typer.Option(None),
 ):
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -133,6 +144,7 @@ def cli_bind_tag(
     tag_id: str = typer.Option(..., prompt=True),
     encrypted_token: str = typer.Option("", help="Mock tag token"),
 ):
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -179,6 +191,7 @@ def cli_confirm_pickup(
     receiver_phone: str | None = typer.Option(None),
     pickup_code: str | None = typer.Option(None),
 ):
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -212,6 +225,7 @@ def cli_confirm_pickup(
 
 @app.command("mock-nfc")
 def cli_mock_nfc(card_uid: str):
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     db = SessionLocal()
@@ -229,6 +243,7 @@ def cli_mock_nfc(card_uid: str):
 
 @app.command("list-parcels")
 def cli_list_parcels(limit: int = 50):
+    _prepare_console()
     db = SessionLocal()
     try:
         rows = list(db.scalars(select(LocalParcel).order_by(LocalParcel.created_at.desc()).limit(limit)))
@@ -240,6 +255,7 @@ def cli_list_parcels(limit: int = 50):
 
 @app.command("list-tags")
 def cli_list_tags(limit: int = 50):
+    _prepare_console()
     db = SessionLocal()
     try:
         rows = list(db.scalars(select(LocalTag).order_by(LocalTag.created_at.desc()).limit(limit)))
@@ -251,6 +267,7 @@ def cli_list_tags(limit: int = 50):
 
 @app.command("list-tasks")
 def cli_list_tasks(limit: int = 50):
+    _prepare_console()
     db = SessionLocal()
     try:
         for t in TaskService(db).list_tasks(limit=limit):
@@ -261,6 +278,7 @@ def cli_list_tasks(limit: int = 50):
 
 @app.command("run")
 def cli_run():
+    _prepare_console()
     settings = get_settings()
     setup_logging(settings.log_level)
     init_db()
