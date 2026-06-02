@@ -32,6 +32,14 @@ def ask(prompt: str, default: str | None = None) -> str:
     return value or (default or '')
 
 
+def ask_required(prompt: str) -> str:
+    while True:
+        value = ask(prompt)
+        if value:
+            return value
+        print(f'{prompt}不能为空，请重新输入。')
+
+
 def pause() -> None:
     input('\n按 Enter 返回...')
 
@@ -190,7 +198,7 @@ class Menu:
         choice = input('> ').strip()
         if choice == '1':
             payload = {
-                'parcel_code': ask('快递号'),
+                'parcel_code': ask_required('快递号'),
                 'pickup_code': ask('取件码', ''),
                 'receiver_user_id': int(ask('收件用户ID', '2')),
                 'receiver_phone': ask('收件手机号', ''),
@@ -202,7 +210,7 @@ class Menu:
         elif choice == '2':
             print_rows(self.client.get('/parcels', auth=True), ['id', 'parcel_code', 'status', 'origin', 'sync_status'], PARCEL_COLUMNS)
         elif choice == '3':
-            parcel = self.client.get(f"/parcels/by-code/{ask('快递号')}", auth=True)
+            parcel = self.client.get(f"/parcels/by-code/{ask_required('快递号')}", auth=True)
             print(format_parcel_result(parcel, '查询到快递'))
         pause()
 

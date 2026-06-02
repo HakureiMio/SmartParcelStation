@@ -1,7 +1,7 @@
 ﻿from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import (
     EventSource,
@@ -159,6 +159,14 @@ class ParcelCreate(BaseModel):
     status: ParcelStatus = ParcelStatus.PRE_REGISTERED
     origin: ParcelOrigin = ParcelOrigin.SERVER_MANUAL
     sync_status: ParcelSyncStatus = ParcelSyncStatus.SERVER_ONLY
+
+    @field_validator('parcel_code')
+    @classmethod
+    def validate_parcel_code(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError('parcel_code is required')
+        return normalized
 
 
 class ParcelStatusPatch(BaseModel):
