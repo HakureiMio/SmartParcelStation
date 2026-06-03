@@ -1,1 +1,19 @@
-<view class="container safe"><view class="card"><view class="title">欢迎回来，{{displayName}}</view><view class="subtitle">站点 {{stationId}} · 今日取件助手已准备好</view></view><view class="card"><view class="row"><text class="label">待取包裹</text><text class="value">{{parcels.length}} 件</text></view><view class="row"><text class="label">最新通知</text><text class="value">{{noticeCount}} 条</text></view><view class="notice" wx:if="{{hint}}"><view class="section-title">本次取件提示</view><view>{{hint.color_display_name || '蓝色'}}闪烁 / {{shelvesText}}</view><view class="hint">{{hint.display_text}}</view></view><view class="hint" wx:if="{{updatedText}}">{{updatedText}}</view></view><view class="action-list"><button class="btn btn-primary" data-page="user-parcels" bindtap="go">查看待取包裹</button><button class="btn btn-primary" data-page="user-pickup-status" bindtap="go">查看取件状态</button><button class="btn btn-ghost" data-page="user-notifications" bindtap="go">查看通知</button><button class="btn btn-ghost" data-page="user-nfc-fast-pickup" bindtap="go">NFC 快速取件</button><button class="btn btn-ghost" bindtap="readGateway">获取门禁取件提示</button><button class="btn btn-ghost" bindtap="logout">退出登录</button></view></view>
+<view class="page safe user-page">
+  <input class="search-bar" value="{{searchText}}" bindinput="onSearch" placeholder="搜索快递编号" />
+  <view class="glass-card pickup-hint" wx:if="{{hint}}">
+    <view class="section-title">取件提示</view>
+    <view class="hint-main">{{hint.display_text}}</view>
+    <view class="hint-sub">货架：{{shelvesText}}</view>
+  </view>
+  <view class="section-title list-title">待取包裹</view>
+  <view class="parcel-card" wx:for="{{filteredParcels}}" wx:key="parcel_code">
+    <view class="parcel-top">
+      <view class="parcel-code">{{item.parcel_code}}</view>
+      <view class="status-pill">{{item.statusText}}</view>
+    </view>
+    <view class="parcel-info-row"><text>货架号</text><text>{{item.shelf_code || '待分配'}}</text></view>
+    <view class="parcel-info-row"><text>标签灯光</text><view class="color-value"><view class="color-dot {{item.colorClass}}"></view><text>{{item.colorName}}</text></view></view>
+    <button class="mini-action" data-code="{{item.parcel_code}}" bindtap="goNfc">NFC 确认</button>
+  </view>
+  <view class="glass-card empty-card" wx:if="{{filteredParcels.length === 0}}">未找到待取包裹</view>
+</view>

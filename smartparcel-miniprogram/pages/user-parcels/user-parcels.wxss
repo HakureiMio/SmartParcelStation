@@ -1,1 +1,4 @@
-
+.parcel-code { font-size: 34rpx; font-weight: 800; color: #0f172a; margin-bottom: 20rpx; }
+.parcel-info-row { display: flex; justify-content: space-between; align-items: center; margin: 16rpx 0; color: #64748b; }
+.parcel-info-row > text:last-child { color: #111827; font-weight: 700; }
+.color-value { display: flex; align-items: center; color: #111827; font-weight: 700; }

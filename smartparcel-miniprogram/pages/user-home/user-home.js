@@ -1,12 +1,28 @@
 const serverApi = require('../../services/server-api')
-const gatewayApi = require('../../services/gateway-api')
 const authService = require('../../services/auth-service')
 
+function normalizeColorName(parcel, hint) {
+  if (hint && hint.color_display_name) return hint.color_display_name
+  return parcel.tag_color || '未分配'
+}
+
+function colorClass(colorName) {
+  if (!colorName) return 'gray'
+  if (colorName.indexOf('绿') >= 0) return 'green'
+  if (colorName.indexOf('橙') >= 0 || colorName.indexOf('黄') >= 0) return 'orange'
+  if (colorName.indexOf('蓝') >= 0) return ''
+  return 'gray'
+}
+
+function statusText(status) {
+  const map = { WAITING_PICKUP: '待取件', ARRIVED_AT_STATION: '已到站', PICKUP_VERIFYING: '待确认', PICKED_UP: '已取件' }
+  return map[status] || '待取件'
+}
+
 Page({
-  data:{ userId:'', displayName:'', stationId:'', parcels:[], noticeCount:0, hint:null, shelvesText:'', updatedText:'' },
-  onLoad(){ const session = authService.requireRole('client'); if (!session) return; this.setData({ userId:session.userId, displayName:session.displayName || '用户', stationId:session.stationId || '1' }); this.refresh() },
-  refresh(){ Promise.all([serverApi.getUserParcels(this.data.userId), serverApi.getUserNotifications(this.data.userId), serverApi.getPickupStatus(this.data.userId)]).then(([p,n,s])=>{ const hint=(s.data||{}).gateway_hint; this.setData({ parcels:p.data||[], noticeCount:(n.data||[]).length, hint, shelvesText: hint && hint.shelves ? hint.shelves.join('、') : '', updatedText:'数据已更新' }); wx.showToast({ title:'更新成功', icon:'success' }) }) },
-  readGateway(){ gatewayApi.gateAccessCard({reader_id:'MINI_USER', credential_type:'CARD_UID', credential_value:'CARD_UID_001'}).then((res)=>{ const hint=res.data; this.setData({hint, shelvesText:hint.shelves ? hint.shelves.join('、') : '', updatedText:'已获取取件提示'}); wx.showToast({ title:'提示已更新', icon:'success' }) }) },
-  go(e){ const page=e.currentTarget.dataset.page; wx.navigateTo({url:`/pages/${page}/${page}`}) },
-  logout(){ authService.clearSession(); wx.reLaunch({ url:'/pages/index/index' }) }
+  data:{ userId:'', parcels:[], filteredParcels:[], hint:null, searchText:'', shelvesText:'' },
+  onLoad(){ const session = authService.requireRole('client'); if (!session) return; this.setData({ userId:session.userId }); this.loadParcels() },
+  loadParcels(){ Promise.all([serverApi.getUserParcels(this.data.userId), serverApi.getPickupStatus(this.data.userId)]).then(([p,s])=>{ const hint=(s.data||{}).gateway_hint || null; const parcels=(p.data||[]).map((item)=>{ const colorName=normalizeColorName(item, hint); return { ...item, colorName, colorClass: colorClass(colorName), statusText: statusText(item.status) } }); this.setData({ parcels, filteredParcels:parcels, hint, shelvesText: hint && hint.shelves ? hint.shelves.join('、') : '' }) }) },
+  onSearch(e){ const text=e.detail.value.trim(); const lower=text.toLowerCase(); const filtered=this.data.parcels.filter((item)=>!lower || item.parcel_code.toLowerCase().indexOf(lower)>=0 || String(item.shelf_code || '').toLowerCase().indexOf(lower)>=0); this.setData({ searchText:text, filteredParcels:filtered }) },
+  goNfc(e){ const code=e.currentTarget.dataset.code || ''; wx.navigateTo({ url:`/pages/user-nfc-fast-pickup/user-nfc-fast-pickup?parcelCode=${code}` }) }
 })

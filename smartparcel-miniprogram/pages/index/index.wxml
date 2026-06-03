@@ -1,13 +1,12 @@
-<view class="landing">
-  <view class="particle p1"></view><view class="particle p2"></view><view class="particle p3"></view><view class="particle p4"></view><view class="particle p5"></view><view class="particle p6"></view><view class="particle p7"></view><view class="particle p8"></view><view class="particle p9"></view><view class="particle p10"></view><view class="particle p11"></view><view class="particle p12"></view>
-  <view class="hero">
-    <view class="logo-mark">S</view>
-    <view class="hero-title">智能快递站</view>
-    <view class="hero-subtitle">快速取件 · 智能寻物 · 本地网关协同</view>
+<view class="landing-page">
+  <view class="particle p1"></view><view class="particle p2"></view><view class="particle p3"></view><view class="particle p4"></view><view class="particle p5"></view><view class="particle p6"></view><view class="particle p7"></view><view class="particle p8"></view>
+  <view class="brand-block">
+    <view class="brand-name">SmartParcel</view>
+    <view class="brand-cn">智能快递站</view>
+    <view class="brand-subtitle">快速取件 · 智能寻物</view>
   </view>
-  <view class="entry-card">
-    <view class="entry-title">请选择入口</view>
-    <button class="entry-button client" data-role="client" bindtap="goLogin">客户入口</button>
-    <button class="entry-button staff" data-role="staff" bindtap="goLogin">员工入口</button>
+  <view class="bottom-actions">
+    <button class="landing-button staff" data-role="staff" bindtap="goLogin">员工端登录</button>
+    <button class="landing-button client" data-role="client" bindtap="goLogin">客户端登录</button>
   </view>
 </view>

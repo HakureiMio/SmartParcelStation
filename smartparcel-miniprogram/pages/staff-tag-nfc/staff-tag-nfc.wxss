@@ -1,1 +1,2 @@
-
+.dev-toggle { text-align: center; color: #94a3b8; font-size: 24rpx; margin: 28rpx 0 12rpx; }
+.dev-box { color: #64748b; font-size: 22rpx; white-space: pre-wrap; }

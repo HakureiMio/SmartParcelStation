@@ -10,6 +10,7 @@
     "pages/user-pickup-status/user-pickup-status",
     "pages/user-nfc-fast-pickup/user-nfc-fast-pickup",
     "pages/staff-home/staff-home",
+    "pages/staff-inbound-bind/staff-inbound-bind",
     "pages/staff-inbound/staff-inbound",
     "pages/staff-tag-bind/staff-tag-bind",
     "pages/staff-tag-nfc/staff-tag-nfc",
@@ -20,7 +21,7 @@
     "navigationBarTitleText": "SPS",
     "navigationBarBackgroundColor": "#fbfcff",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f6f8fc"
+    "backgroundColor": "#fbfcff"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

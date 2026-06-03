@@ -1,12 +1,7 @@
-.login-page { min-height: 100vh; padding: 120rpx 34rpx 40rpx; box-sizing: border-box; background: linear-gradient(180deg, #fbfcff, #f3f7ff); }
-.login-page.staff { background: linear-gradient(180deg, #fbfffe, #f2fbf8); }
-.login-card { background: rgba(255,255,255,.94); border-radius: 38rpx; padding: 42rpx 34rpx; box-shadow: 0 24rpx 70rpx rgba(15,23,42,.10); border: 1rpx solid rgba(226,232,240,.9); }
+.login-page { min-height: 100vh; padding: 150rpx 34rpx 40rpx; box-sizing: border-box; background: linear-gradient(180deg, #ffffff, #f6f9ff); }
+.login-card { padding: 44rpx 34rpx; }
 .login-title { font-size: 44rpx; font-weight: 800; color: #0f172a; }
-.login-subtitle { margin: 14rpx 0 36rpx; color: #64748b; font-size: 26rpx; }
-.form-label { color: #475569; font-size: 25rpx; margin: 20rpx 0 10rpx; }
-.login-input { height: 92rpx; background: #f8fafc; border: 1rpx solid #e5e7eb; border-radius: 24rpx; padding: 0 24rpx; box-sizing: border-box; }
-.login-button { margin-top: 34rpx; height: 96rpx; line-height: 96rpx; border-radius: 26rpx; color: #fff; font-weight: 800; box-shadow: 0 16rpx 36rpx rgba(37,99,235,.20); }
-.login-button.client { background: linear-gradient(135deg, #60a5fa, #2563eb); }
-.login-button.staff { background: linear-gradient(135deg, #2dd4bf, #0f766e); box-shadow: 0 16rpx 36rpx rgba(15,118,110,.18); }
+.login-subtitle { margin: 14rpx 0 36rpx; color: #94a3b8; font-size: 26rpx; }
+.login-input { height: 92rpx; background: rgba(248,250,252,.95); border: 1rpx solid #e5e7eb; border-radius: 28rpx; padding: 0 26rpx; box-sizing: border-box; }
+.login-button { margin-top: 34rpx; height: 96rpx; min-height: 96rpx; }
 .demo-tip { margin-top: 28rpx; text-align: center; color: #94a3b8; font-size: 23rpx; line-height: 1.6; }
-.error { margin: 20rpx 0 0; }
