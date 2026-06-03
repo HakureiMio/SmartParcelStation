@@ -1,45 +1,48 @@
-﻿# 轻量二进制协议说明
+# Lightweight binary protocol
 
-本协议用于夹具节点与本地网关之间通信，避免 JSON 带来的内存和解析开销。
+The clip node uses a compact binary frame for BLE/GATT payloads and mock test injection. It does not parse JSON and does not carry phone numbers, user data, parcel details, or cloud sync data.
 
-## 1. 帧格式
+## Frame format
 
-建议固定头 + 长度 + 负载 + 校验：
+| Byte | Field | Description |
+| --- | --- | --- |
+| 0 | `0xA5` | Fixed frame header |
+| 1 | `cmd` or `event` | Command/event id |
+| 2 | `len` | Payload length, max 16 bytes |
+| 3..N | `payload` | Optional payload |
+| Last | `checksum` | XOR from header through payload |
 
-- Byte0: `0xA5`（帧头）
-- Byte1: `cmd`（命令字）
-- Byte2: `len`（payload 长度）
-- Byte3..N: `payload`
-- Last: `checksum`（从 Byte0 到 payload 最后一个字节做 XOR）
+## Commands
 
-## 2. 命令字定义
+| Value | Name | Behavior |
+| --- | --- | --- |
+| `0x01` | `PING` | Reply with `PONG` |
+| `0x02` | `WAKE_TAG` | Enter `alerting`, blink RGB, beep intermittently, auto-stop after 30 seconds |
+| `0x03` | `STOP_ALERT` | Turn off RGB/buzzer and return to `bound` or `idle` |
+| `0x04` | `SET_BINDING` | Store a short binding token, then enter `bound` |
+| `0x05` | `CLEAR_BINDING` | Clear local binding token and enter `idle` |
+| `0x06` | `READ_STATUS` | Sample battery and report state |
 
-- `0x01` alert_start
-- `0x02` alert_stop
-- `0x03` set_color
-- `0x04` beep_success
-- `0x05` beep_error
-- `0x06` battery_check
-- `0x07` sleep
+## Events
 
-## 3. 事件字定义
+| Value | Name |
+| --- | --- |
+| `0x81` | `BOOT` |
+| `0x82` | `COMMAND_ACK` |
+| `0x83` | `CLIP_REMOVED` |
+| `0x84` | `CLIP_RETURNED` |
+| `0x85` | `BATTERY_LOW` |
+| `0x86` | `BATTERY_STATE_CHANGED` |
+| `0x87` | `STATUS_REPORT` |
+| `0x88` | `PONG` |
 
-- `0x81` boot
-- `0x82` command_ack
-- `0x83` clip_removed
-- `0x84` clip_returned
-- `0x85` battery_low
-- `0x86` battery_state_changed
+## Stored data boundary
 
-## 4. set_color 负载
+The clip firmware may retain only:
 
-- `payload[0]`: R 档位（0~6）
-- `payload[1]`: G 档位（0~6）
-- `payload[2]`: B 档位（0~6）
+- `tag_id`
+- `binding_token` or a short token/hash
+- `device_config`
+- `last_state`
 
-共 7×7×7 = 343 颜色组合。
-
-## 5. command_ack 负载
-
-- `payload[0]`: 原命令字
-- `payload[1]`: 执行结果（0=成功，非0=失败原因）
+User permissions, parcel database records, phone numbers, pickup flow, and cloud synchronization remain in the gateway/server domains.

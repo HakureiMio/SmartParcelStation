@@ -15,6 +15,7 @@ typedef struct {
 
 void led_rgb_init(void);
 void led_rgb_set_level(rgb_level_t level);
+void led_rgb_off(void);
 void led_rgb_blink(rgb_level_t level, uint32_t on_ms, uint32_t off_ms, uint8_t times);
 void led_rgb_effect_success(void);
 void led_rgb_effect_error(void);

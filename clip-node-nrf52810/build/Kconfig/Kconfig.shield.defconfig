@@ -1,2 +1,0 @@
-osource "D:/Project/SmartParcelStation/clip-node-nrf52810/boards/shields/*/Kconfig.defconfig"
-osource "D:/Tools/ProgramData/ncs/v3.2.4/nrf/boards/shields/*/Kconfig.defconfig"

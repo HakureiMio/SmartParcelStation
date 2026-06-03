@@ -11,6 +11,7 @@ typedef void (*remove_sensor_cb_t)(bool removed);
 
 void remove_sensor_init(remove_sensor_cb_t cb);
 void remove_sensor_poll_once(void);
+bool remove_sensor_is_removed(void);
 
 #ifdef __cplusplus
 }

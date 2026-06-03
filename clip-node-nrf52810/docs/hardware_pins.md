@@ -1,38 +1,31 @@
-﻿# 硬件引脚分配（待补充）
+# EWT73-2G4M04S1A hardware pin map
 
-当前项目为骨架版本，nRF52810 引脚号先留空，后续根据原理图补齐。
+Current hardware validation uses the Ebyte EWT73-2G4M04S1A test kit with the E73-2G4M04S1A / nRF52810 module.
 
-## 1. RGB PWM
+The test kit is suitable for firmware bring-up and GPIO/PWM/ADC verification. The production clip should use a standalone E73 module on a custom PCB. The EWT73 test kit board itself is not intended to be the final clip mechanical structure.
 
-- `PIN_LED_R_PWM`: TODO
-- `PIN_LED_G_PWM`: TODO
-- `PIN_LED_B_PWM`: TODO
+## Test pin assignment
 
-说明：3 个 5050 RGB 灯珠同步显示，三路 PWM 即可。
+| Signal | nRF52810 pin | Usage |
+| --- | --- | --- |
+| `PIN_LED_R_PWM` | `P0.11` | RGB red PWM output |
+| `PIN_LED_G_PWM` | `P0.12` | RGB green PWM output |
+| `PIN_LED_B_PWM` | `P0.15` | RGB blue PWM output |
+| `PIN_BUZZER_CTRL` | `P0.16` | Active buzzer or MOSFET/NPN control |
+| `PIN_REMOVE_SENSE` | `P0.19` | Clip contact/remove detect input |
+| `PIN_BAT_ADC` | `P0.02 / AIN0` | Battery divider ADC input |
+| `PIN_BAT_DIV_EN` | `P0.20` | Battery divider enable output |
+| `PIN_USER_BTN` | `P0.21` | Optional test button |
+| `PIN_STATUS_LED` | `P0.22` | Optional debug status LED |
 
-## 2. 蜂鸣器驱动
+## Reserved debug and power pins
 
-- `PIN_BUZZER_CTRL`: TODO
+- `SWDIO`, `SWDCLK`, `VCC`, and `GND` are reserved for SWD debug and board power.
+- Do not use `SWDIO` or `SWDCLK` as normal GPIO in firmware or the production PCB.
+- Keep `VCC` as the debug probe voltage reference and always share `GND`.
 
-说明：通过 MOSFET 或 NPN 三极管驱动 3V 有源蜂鸣器。
+## Production PCB notes
 
-## 3. 取下检测输入
-
-- `PIN_REMOVE_SENSE`: TODO
-
-说明：可接微动开关/压力触点/机械触点，建议上拉并配合软件消抖。
-
-## 4. 电池检测 ADC
-
-- `PIN_BAT_ADC`: TODO（可选）
-- `PIN_BAT_DIV_EN`: TODO（可选）
-
-说明：`PIN_BAT_DIV_EN` 用于按需打开分压回路，降低静态漏电。
-
-## 5. SWD 调试口
-
-- `SWDIO`: 固定调试引脚
-- `SWDCLK`: 固定调试引脚
-- `RESET`: 建议引出
-- `VCC`: 电平参考
-- `GND`: 地
+- Replace the board DTS pin aliases when moving from the EWT73 test kit to the custom clip PCB.
+- Keep the same logical names in firmware (`led-red-pwm`, `buzzer-ctrl`, `remove-sense`, `bat-adc`, `bat-div-en`) so application code does not need to change.
+- Recheck active polarity for RGB LEDs, buzzer driver, remove contact, and battery divider enable on the production schematic.

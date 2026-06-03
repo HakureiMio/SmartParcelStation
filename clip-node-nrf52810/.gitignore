@@ -1,0 +1,49 @@
+# Zephyr / nRF Connect SDK build outputs
+build/
+build_*/
+out/
+.west/
+
+# CMake / Ninja
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+.ninja_*
+build.ninja
+rules.ninja
+
+# Zephyr generated files
+zephyr/
+!zephyr/
+!zephyr/module.yml
+merged.hex
+zephyr.hex
+zephyr.elf
+zephyr.bin
+app_update.bin
+dfu_application.zip
+*.map
+*.lst
+*.dts.pre
+*.config
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+.vscode/.nrf-connect-*
+.vscode/settings.json
+
+# Python virtual environments and cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Sensitive local configuration
+.env
+.env.*
+*.key
+*.pem
+*.secret

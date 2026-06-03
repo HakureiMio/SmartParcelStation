@@ -43,6 +43,9 @@ logs/
 
 # Build outputs
 build/
+build_*/
+out/
+.west/
 dist/
 *.egg-info/
 
@@ -51,18 +54,43 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
+.ninja_*
+build.ninja
+rules.ninja
 *.elf
 *.hex
 *.bin
 *.map
+*.lst
+*.dts.pre
+*.config
+zephyr/
+!clip-node-nrf52810/zephyr/
+!clip-node-nrf52810/zephyr/module.yml
+merged.hex
+zephyr.hex
+zephyr.elf
+zephyr.bin
+app_update.bin
+dfu_application.zip
 
 # OS
 .DS_Store
 Thumbs.db
 
 # IDE
-.vscode/
+.vscode/.nrf-connect-*
+.vscode/settings.json
 .idea/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Sensitive keys and secrets
+*.key
+*.pem
+*.secret
 
 # Keep project documentation and migration sources trackable
 !requirements.txt
