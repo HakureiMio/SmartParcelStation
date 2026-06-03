@@ -4,6 +4,7 @@ import uuid
 import time
 import shutil
 from pathlib import Path
+from datetime import datetime
 from sqlalchemy import select
 import typer
 from loguru import logger
@@ -13,7 +14,7 @@ from gateway.core.logging import setup_logging
 from gateway.console import setup_utf8_console
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
-from gateway.models.entities import BindingStatus, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType
+from gateway.models.entities import BindingStatus, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType, TagStatus
 from gateway.mqtt.client import GatewayMqttClient
 from gateway.mqtt.handlers import handle_server_command
 from gateway.services.heartbeat_service import HeartbeatService
@@ -211,6 +212,8 @@ def cli_bind_tag(
     parcel_code: str = typer.Option(..., prompt=True),
     tag_id: str = typer.Option(..., prompt=True),
     encrypted_token: str = typer.Option("", help="Mock tag token"),
+    auto_register: bool = typer.Option(False, help="Development only: create the local tag if it was not registered first"),
+    upload_audit: bool = typer.Option(False, help="Compatibility only: upload TAG_BOUND as a business audit event"),
 ):
     _prepare_console()
     settings = get_settings()
@@ -222,9 +225,31 @@ def cli_bind_tag(
             raise typer.BadParameter(f"parcel not found: {parcel_code}")
         tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
         if tag is None:
-            tag = LocalTag(tag_id=tag_id, encrypted_token=encrypted_token, station_id=settings.station_id)
+            if not auto_register:
+                raise typer.BadParameter(f"tag not registered locally: {tag_id}. Run register-tag first or pass --auto-register for development.")
+            tag = LocalTag(
+                tag_id=tag_id,
+                encrypted_token=encrypted_token,
+                station_id=settings.station_id,
+                status=TagStatus.IDLE,
+                hw_model="E73-2G4M04S1A",
+                registered_at=datetime.utcnow(),
+            )
             db.add(tag)
             db.commit()
+        elif encrypted_token:
+            tag.encrypted_token = encrypted_token
+
+        active_binding = db.scalar(select(LocalParcelTagBinding).where(
+            LocalParcelTagBinding.server_parcel_id == parcel.server_parcel_id,
+            LocalParcelTagBinding.tag_id == tag_id,
+            LocalParcelTagBinding.status == BindingStatus.ACTIVE,
+        ))
+        if active_binding:
+            db.commit()
+            typer.echo(f"tag already bound locally: {parcel_code} -> {tag_id}")
+            return
+
         binding_id = uuid.uuid4().hex
         binding = LocalParcelTagBinding(
             pickup_binding_id=binding_id,
@@ -234,21 +259,148 @@ def cli_bind_tag(
             status=BindingStatus.ACTIVE,
         )
         db.add(binding)
+        tag.status = TagStatus.RUNNING
         db.commit()
+        if upload_audit:
+            SyncService(db, ServerClient(settings), settings.station_id).enqueue_event_upload(
+                {
+                    "event_id": uuid.uuid4().hex,
+                    "event_type": "TAG_BOUND",
+                    "payload_json": {
+                        "parcel_code": parcel_code,
+                        "tag_id": tag_id,
+                        "pickup_binding_id": binding_id,
+                        "station_id": settings.station_id,
+                        "audit_only": True,
+                    },
+                }
+            )
+        typer.echo(f"tag bound locally: {parcel_code} -> {tag_id}")
+    finally:
+        db.close()
+
+
+@app.command("register-tag")
+def cli_register_tag(
+    tag_id: str = typer.Option(..., prompt=True),
+    tag_uid: str | None = typer.Option(None),
+    hw_model: str = typer.Option("E73-2G4M04S1A"),
+    fw_version: str | None = typer.Option(None),
+    encrypted_token: str | None = typer.Option(None, "--encrypted-token", "--tag-token", help="Optional local binding token"),
+):
+    _prepare_console()
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+        if tag is None:
+            tag = LocalTag(
+                tag_id=tag_id,
+                tag_uid=tag_uid,
+                encrypted_token=encrypted_token or "",
+                station_id=settings.station_id,
+                status=TagStatus.IDLE,
+                hw_model=hw_model,
+                fw_version=fw_version,
+                registered_at=datetime.utcnow(),
+            )
+            db.add(tag)
+        else:
+            tag.tag_uid = tag_uid or tag.tag_uid
+            tag.hw_model = hw_model or tag.hw_model
+            tag.fw_version = fw_version or tag.fw_version
+            if encrypted_token is not None:
+                tag.encrypted_token = encrypted_token
+            tag.registered_at = tag.registered_at or datetime.utcnow()
+        db.commit()
+        typer.echo(f"tag registered locally: {tag_id}")
+    finally:
+        db.close()
+
+
+@app.command("release-tag")
+def cli_release_tag(
+    tag_id: str = typer.Option(..., prompt=True),
+    parcel_code: str | None = typer.Option(None),
+    release_reason: str = typer.Option("MANUAL_RELEASE"),
+):
+    _prepare_console()
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+        if tag is None:
+            raise typer.BadParameter(f"tag not registered locally: {tag_id}")
+
+        query = select(LocalParcelTagBinding).where(
+            LocalParcelTagBinding.tag_id == tag_id,
+            LocalParcelTagBinding.status == BindingStatus.ACTIVE,
+        )
+        if parcel_code:
+            parcel = db.scalar(select(LocalParcel).where(LocalParcel.parcel_code == parcel_code))
+            if parcel is None:
+                raise typer.BadParameter(f"parcel not found: {parcel_code}")
+            query = query.where(LocalParcelTagBinding.server_parcel_id == parcel.server_parcel_id)
+
+        bindings = list(db.scalars(query))
+        now = datetime.utcnow()
+        for binding in bindings:
+            binding.status = BindingStatus.RELEASED
+            binding.released_at = now
+            binding.release_reason = release_reason
+        tag.status = TagStatus.IDLE
+        db.commit()
+        typer.echo(f"tag released locally: {tag_id}, bindings={len(bindings)}")
+    finally:
+        db.close()
+
+
+@app.command("report-tag-exception")
+def cli_report_tag_exception(
+    tag_id: str = typer.Option(..., prompt=True),
+    exception_type: str = typer.Option(...),
+    severity: str = typer.Option("WARNING"),
+    message: str = typer.Option(...),
+):
+    _prepare_console()
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    db = SessionLocal()
+    try:
+        tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+        if tag is None:
+            raise typer.BadParameter(f"tag not registered locally: {tag_id}")
+
+        now = datetime.utcnow()
+        tag.last_error_type = exception_type
+        tag.last_error_message = message
+        tag.last_error_at = now
+        if exception_type.upper() == "LOW_BATTERY":
+            tag.status = TagStatus.LOW_BATTERY
+        elif severity.upper() in {"ERROR", "CRITICAL"}:
+            tag.status = TagStatus.ERROR
+
+        payload = {
+            "event_type": "TAG_EXCEPTION_REPORTED",
+            "gateway_code": settings.gateway_code,
+            "station_id": settings.station_id,
+            "tag_ref": tag_id,
+            "exception_type": exception_type,
+            "severity": severity,
+            "message": message,
+            "occurred_at": now.isoformat() + "Z",
+        }
         SyncService(db, ServerClient(settings), settings.station_id).enqueue_event_upload(
             {
                 "event_id": uuid.uuid4().hex,
-                "event_type": "TAG_BOUND",
-                "payload_json": {
-                    "parcel_code": parcel_code,
-                    "tag_id": tag_id,
-                    "encrypted_token": encrypted_token,
-                    "pickup_binding_id": binding_id,
-                    "station_id": settings.station_id,
-                },
+                "event_type": "TAG_EXCEPTION_REPORTED",
+                "payload_json": payload,
             }
         )
-        typer.echo(f"tag bound and queued: {parcel_code} -> {tag_id}")
+        db.commit()
+        typer.echo(f"tag exception queued: {tag_id} {exception_type} {severity}")
     finally:
         db.close()
 
@@ -258,6 +410,7 @@ def cli_confirm_pickup(
     parcel_code: str = typer.Option(..., prompt=True),
     receiver_phone: str | None = typer.Option(None),
     pickup_code: str | None = typer.Option(None),
+    pickup_method: str = typer.Option("OFFLINE_MANUAL"),
 ):
     _prepare_console()
     settings = get_settings()
@@ -273,6 +426,19 @@ def cli_confirm_pickup(
             raise typer.BadParameter("pickup_code does not match local parcel")
         parcel.status = ParcelStatus.PICKED_UP
         parcel.sync_status = "SYNC_PENDING"
+        method = pickup_method.upper()
+        now = datetime.utcnow()
+        bindings = list(db.scalars(select(LocalParcelTagBinding).where(
+            LocalParcelTagBinding.server_parcel_id == parcel.server_parcel_id,
+            LocalParcelTagBinding.status == BindingStatus.ACTIVE,
+        )))
+        for binding in bindings:
+            binding.status = BindingStatus.RELEASED
+            binding.released_at = now
+            binding.release_reason = f"PICKUP_{method}"
+            tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == binding.tag_id))
+            if tag:
+                tag.status = TagStatus.IDLE
         service = SyncService(db, ServerClient(settings), settings.station_id)
         event = service.create_pickup_event(
             PickupEventType.OFFLINE_PICKUP,
@@ -281,6 +447,7 @@ def cli_confirm_pickup(
                 "server_parcel_id": parcel.server_parcel_id,
                 "receiver_phone_confirmed": bool(receiver_phone),
                 "pickup_code_confirmed": bool(pickup_code),
+                "pickup_method": method,
             },
             server_parcel_id=parcel.server_parcel_id,
             user_id=parcel.receiver_user_id,

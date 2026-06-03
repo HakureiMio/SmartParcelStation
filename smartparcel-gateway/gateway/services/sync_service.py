@@ -65,33 +65,8 @@ class SyncService:
                 obj.origin = p.get("origin", obj.origin)
                 obj.sync_status = p.get("sync_status", obj.sync_status)
                 obj.local_updated_at = datetime.utcnow()
-        for t in data.get("tags", []):
-            obj = self.db.scalar(select(LocalTag).where(LocalTag.tag_id == t["tag_id"]))
-            if obj is None:
-                self.db.add(LocalTag(
-                    server_tag_id=t.get("server_tag_id"),
-                    tag_id=t["tag_id"],
-                    encrypted_token=t.get("encrypted_token", ""),
-                    station_id=t.get("station_id", self.station_id),
-                    status=t.get("status", TagStatus.IDLE),
-                ))
-            else:
-                obj.status = t.get("status", obj.status)
-                obj.battery_level = t.get("battery_level")
-                obj.last_seen_at = datetime.utcnow()
-        for b in data.get("bindings", []):
-            obj = self.db.scalar(select(LocalParcelTagBinding).where(LocalParcelTagBinding.pickup_binding_id == b["pickup_binding_id"]))
-            if obj is None:
-                self.db.add(LocalParcelTagBinding(
-                    server_binding_id=b.get("server_binding_id"),
-                    pickup_binding_id=b["pickup_binding_id"],
-                    server_parcel_id=b["server_parcel_id"],
-                    tag_id=b["tag_id"],
-                    station_id=b.get("station_id", self.station_id),
-                    status=b.get("status", BindingStatus.ACTIVE),
-                ))
-            else:
-                obj.status = b.get("status", obj.status)
+        if data.get("tags") or data.get("bindings"):
+            logger.info("ignore server tag/binding payloads: smart tag master data is gateway-local-first")
         self.db.commit()
         logger.info("sync pull done")
         return data

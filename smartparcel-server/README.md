@@ -1,6 +1,6 @@
 ﻿# SmartParcel Server
 
-SmartParcelStation 快递站系统服务端项目（局域网验证阶段）。提供统一的 `/api/v1` REST API，覆盖站点管理、网关同步、快递与标签绑定、取件流程、通知管理，以及与 EMQX 的 MQTT 基础集成。
+SmartParcelStation 快递站系统服务端项目（局域网验证阶段）。提供统一的 `/api/v1` REST API，覆盖站点管理、网关同步、快递取件流程、通知管理，以及与 EMQX 的 MQTT 基础集成。智能寻物标签采用 gateway-local-first 管理模式，server 不作为标签管理后台。
 
 ## 1. 项目说明
 
@@ -172,7 +172,7 @@ MQTT Topic 约定：
 
 ## 10. 阶段 A：server 侧 mock 闭环流程
 
-当前阶段快递公司上传用“服务器手动预录入快递”代替；微信小程序前端暂不实现，只保留账号角色和接口职责。server 负责中心记录、通知占位和同步审计，不直接控制标签亮灯/蜂鸣。
+当前阶段快递公司上传用“服务器手动预录入快递”代替；微信小程序前端暂不实现，只保留账号角色和接口职责。server 负责中心记录、通知占位和同步审计，不直接控制智能寻物标签亮灯、蜂鸣、绑定、释放或状态查询。
 
 ### 10.1 启动依赖和 API
 
@@ -222,10 +222,23 @@ python -m admin_console.main
 server 收到以下事件时会落业务：
 
 - `GATEWAY_INBOUND` / `PARCEL_ARRIVED` / `INBOUND_PARCEL`：按 `parcel_code` 合并预录入包裹，或新建 `GATEWAY_INBOUND` 来源包裹。
-- `TAG_BOUND` / `TAG_RELEASED` / `TAG_STATUS_REPORT`：保存标签和绑定关系镜像，不直接控制标签。
-- `PICKUP_CONFIRMED` / `OFFLINE_PICKUP`：更新包裹为 `PICKED_UP`，记录 pickup event。
+- `TAG_EXCEPTION_REPORTED`：接收 gateway 判断后的标签异常摘要，生成站点工作人员通知和同步审计，不更新标签实时状态。
+- `PICKUP_CONFIRMED` / `OFFLINE_PICKUP` / `NFC_FAST_PICKUP_CONFIRMED`：更新包裹为 `PICKED_UP`，记录 pickup event；payload 中的 `pickup_method = TAG_NFC_FAST` 用于审计智能寻物标签 NFC 快速取件。
+- `TAG_BOUND` / `TAG_RELEASED`：仅保留兼容旧 mock 或可选业务审计语义，不生成标签实时状态表或管理视图。
+- `TAG_STATUS_REPORT`：deprecated，仅兼容旧 mock；实体智能寻物标签阶段不作为常规同步事件上传 server。
 
-### 10.5 数据库迁移
+### 10.5 服务器侧标签相关职责
+
+智能寻物标签的注册、绑定、释放、在线/离线、电量、BLE 地址、固件版本、最后心跳、异常判断和 BLE 控制全部由 gateway 本地管理。server 不保存完整标签状态镜像，也不提供标签实时管理接口。
+
+server 只保留两类标签相关业务信息：
+
+- `TAG_EXCEPTION_REPORTED`：由 gateway 判断并上传异常摘要，server 生成 `STAFF` / `GATEWAY_ADMIN` 工作人员通知和同步事件审计。
+- 取件审计：`PICKUP_CONFIRMED`、`OFFLINE_PICKUP` 或兼容的 `NFC_FAST_PICKUP_CONFIRMED` 中保留 `pickup_method`；智能寻物标签 NFC 快速取件统一使用 `TAG_NFC_FAST`。
+
+原则：标签日常状态不上云，标签异常才上报；标签控制不上云，取件结果才上报。
+
+### 10.6 数据库迁移
 
 本阶段新增迁移：
 

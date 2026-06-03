@@ -4,7 +4,7 @@
 - 本地 SQLite 离线数据存储
 - 通过 HTTP/HTTPS 与 `smartparcel-server` 同步
 - 通过 MQTT（EMQX）接收服务器命令与上报网关事件
-- 预留 PN532 NFC / BLE 标签接口，当前提供 mock 实现
+- 预留 PN532 NFC / BLE 智能寻物标签接口，当前提供 mock 实现
 
 ## 1. 项目说明
 
@@ -15,6 +15,7 @@
 - heartbeat
 - MQTT 发布与订阅
 - mock NFC 刷卡触发 TAG_WAKE
+- 智能寻物标签 gateway-local-first 管理：标签完整状态只保存在本地 SQLite
 
 ## 2. 局域网验证部署方式
 
@@ -137,7 +138,7 @@ python -m gateway.main sync-push
 
 ## 10. 阶段 A：gateway 侧 mock 闭环流程
 
-当前阶段条形码扫描用工作人员手动输入代替；自助扫码取件暂不实现，只做人工确认取件和 NFC_FAST 结构预留。标签真实管理在 gateway，server 只保存镜像和审计。
+当前阶段条形码扫描用工作人员手动输入代替；自助扫码取件暂不实现，只做人工确认取件和 `TAG_NFC_FAST` 结构预留。智能寻物标签真实管理在 gateway，server 只接收标签异常摘要和取件审计。
 
 ### 10.1 初始化 gateway
 
@@ -175,19 +176,19 @@ python -m gateway.main sync-push
 
 该命令会写入本地 `local_parcels`，并加入 `sync_queue`。上传事件类型为 `GATEWAY_INBOUND`。server 收到后会按 `parcel_code` 匹配预录入包裹，匹配成功则更新为待取件，匹配失败则新建来源为 `GATEWAY_INBOUND` 的中心包裹。
 
-### 10.3 模拟本地标签绑定
+### 10.3 模拟本地标签注册与绑定
 
 ```powershell
-python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001 --encrypted-token mock-token
-python -m gateway.main sync-push
+python -m gateway.main register-tag --tag-id TAG001 --hw-model E73-2G4M04S1A
+python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
 ```
 
-该命令会写入本地 `local_tags` 和 `local_parcel_tag_bindings`，并上传 `TAG_BOUND`。server 只保存标签绑定镜像，不作为正式标签控制入口。
+`register-tag` 写入或更新本地 `local_tags`；`bind-tag` 写入本地 `local_parcel_tag_bindings`，默认不上传 server。开发测试如需兼容旧审计，可显式增加 `bind-tag --upload-audit`；实体智能寻物标签阶段不依赖 server 查询标签状态。
 
 ### 10.4 模拟人工确认取件
 
 ```powershell
-python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456
+python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --pickup-method OFFLINE_MANUAL
 python -m gateway.main sync-push
 ```
 
@@ -202,7 +203,30 @@ python -m gateway.main sync-push
 
 现有流程继续保留：gateway 本地认证通过后创建 `TAG_WAKE` task，并调用 mock BLE 执行亮灯/蜂鸣。
 
-## 11. 公网 HTTPS 与 HMAC 签名
+## 11. 智能寻物标签本地管理流程
+
+智能寻物标签采用 `gateway-local-first` 管理模式：`local_tags` 是标签完整状态的唯一主数据表，`local_parcel_tag_bindings` 是标签与包裹绑定关系的本地主数据表。标签日常状态不上云，标签异常才上报；标签控制不上云，取件结果才上报。
+
+- `register-tag`：本地注册智能寻物标签，写入/更新 `local_tags`，不上传 server。
+- `bind-tag`：默认要求标签已注册，只更新 `local_parcel_tag_bindings` 和 `local_tags`；`--auto-register` 仅用于开发测试。
+- `mock-nfc` / `TAG_WAKE` / `TAG_STOP`：寻物亮灯、蜂鸣、停止提醒和状态查询都在 gateway 本地执行；未来 mock BLE 替换为真实 BLE 后 server 职责不变。
+- `release-tag`：取件后或人工释放标签，只更新本地绑定和标签状态；释放动作本身默认不上传 server。
+- `report-tag-exception`：把 `TAG_EXCEPTION_REPORTED` 写入 `sync_queue`，payload 只包含 `tag_ref`、异常类型、严重级别、消息和发生时间，不包含完整标签状态。
+- `confirm-pickup --pickup-method TAG_NFC_FAST`：用于高级用户通过智能寻物标签 NFC 快速取件；上传取件审计时保留 `pickup_method = TAG_NFC_FAST`。
+
+本地保留但不作为 server 常规同步事件的内容包括：标签注册、标签 UID、硬件型号、固件版本、BLE 地址、在线/离线、电量、最后心跳、当前状态、绑定/释放关系、`TAG_WAKE`、`TAG_STOP`、`TAG_STATUS_QUERY`、`TAG_BATTERY_UPDATED`。`sync-push` 不上传完整标签状态；只上传标签异常摘要和取件完成审计。
+
+示例：
+
+```powershell
+python -m gateway.main register-tag --tag-id TAG001 --hw-model E73-2G4M04S1A
+python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
+python -m gateway.main report-tag-exception --tag-id TAG001 --exception-type LOW_BATTERY --severity WARNING --message "智能寻物标签电量过低"
+python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --pickup-method TAG_NFC_FAST
+python -m gateway.main sync-push
+```
+
+## 12. 公网 HTTPS 与 HMAC 签名
 
 公网实验时推荐把 `SERVER_BASE_URL` 改为 HTTPS 域名，例如：
 
@@ -230,7 +254,7 @@ gateway 请求会自动附带：
 
 普通 HTTPS 用来验证服务器证书并加密传输；HMAC 用来证明 gateway 身份并保证消息完整性。mTLS 后续可选，本阶段不强制。
 
-## 10. 与 smartparcel-server 接口约定
+## 13. 与 smartparcel-server 接口约定
 
 已封装：
 - `GET /api/v1/health`
@@ -238,10 +262,10 @@ gateway 请求会自动附带：
 - `GET /api/v1/gateways/{gateway_id}/sync/pull`
 - `POST /api/v1/gateways/{gateway_id}/sync/push`
 - `POST /api/v1/gateways/{gateway_id}/events`
-- `POST /api/v1/tags/status-report`
+- `POST /api/v1/tags/status-report`（兼容旧 mock，不作为实体智能寻物标签阶段常规事件）
 - `POST /api/v1/pickup/confirm`（预留）
 
-## 11. 迁移公网服务器时只需修改
+## 14. 迁移公网服务器时只需修改
 
 - `SERVER_BASE_URL` 改为 `https://...`
 - `MQTT_HOST` / `MQTT_PORT` 指向公网 Broker
@@ -255,7 +279,10 @@ gateway 请求会自动附带：
 - `python -m gateway.main sync-push`
 - `python -m gateway.main heartbeat`
 - `python -m gateway.main inbound-parcel`
+- `python -m gateway.main register-tag`
 - `python -m gateway.main bind-tag`
+- `python -m gateway.main release-tag`
+- `python -m gateway.main report-tag-exception`
 - `python -m gateway.main confirm-pickup`
 - `python -m gateway.main run`
 - `python -m gateway.main mock-nfc CARD_UID`

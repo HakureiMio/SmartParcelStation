@@ -474,9 +474,11 @@ async def apply_gateway_business_event(db: AsyncSession, gateway_id: int, statio
     normalized = event_type.upper()
     if normalized in {'GATEWAY_INBOUND', 'PARCEL_ARRIVED', 'INBOUND_PARCEL'}:
         await apply_gateway_inbound(db, station_id, payload)
+    elif normalized == 'TAG_EXCEPTION_REPORTED':
+        await apply_gateway_tag_exception_event(db, station_id, payload)
     elif normalized in {'TAG_BOUND', 'TAG_RELEASED', 'TAG_STATUS_REPORT'}:
         await apply_gateway_tag_event(db, station_id, normalized, payload)
-    elif normalized in {'PICKUP_CONFIRMED', 'OFFLINE_PICKUP'}:
+    elif normalized in {'PICKUP_CONFIRMED', 'OFFLINE_PICKUP', 'NFC_FAST_PICKUP_CONFIRMED'}:
         await apply_gateway_pickup_event(db, gateway_id, station_id, payload)
 
 
@@ -525,49 +527,40 @@ async def apply_gateway_inbound(db: AsyncSession, station_id: int, payload: dict
 
 
 async def apply_gateway_tag_event(db: AsyncSession, station_id: int, event_type: str, payload: dict) -> None:
-    tag_code = payload.get('tag_id')
-    if not tag_code:
-        return
-    result = await db.execute(select(Tag).where(Tag.tag_id == tag_code))
-    tag = result.scalar_one_or_none()
-    if not tag:
-        tag = Tag(
-            tag_id=tag_code,
-            encrypted_token=payload.get('encrypted_token', ''),
-            station_id=int(payload.get('station_id') or station_id),
-            status=TagStatus.ONLINE,
-            battery_level=payload.get('battery_level'),
-        )
-        db.add(tag)
-        await db.flush()
+    # Gateway-local-first smart tag mode:
+    # TAG_BOUND/TAG_RELEASED are compatibility audit events only, and
+    # TAG_STATUS_REPORT is deprecated for production sync. The server keeps the
+    # GatewaySyncEvent audit row created by gateway_push_sync(), but does not
+    # create/update Tag or ParcelTagBinding state mirrors here.
+    return
 
-    if event_type == 'TAG_STATUS_REPORT':
-        tag.status = payload.get('status') or tag.status
-        tag.battery_level = payload.get('battery_level')
-        tag.last_seen_at = datetime.now(timezone.utc)
-        return
 
-    pickup_binding_id = payload.get('pickup_binding_id')
-    parcel_code = payload.get('parcel_code')
-    if not pickup_binding_id or not parcel_code:
-        return
-    parcel_result = await db.execute(select(Parcel).where(Parcel.parcel_code == parcel_code))
-    parcel = parcel_result.scalar_one_or_none()
-    if not parcel:
-        return
-    binding_result = await db.execute(select(ParcelTagBinding).where(ParcelTagBinding.pickup_binding_id == pickup_binding_id))
-    binding = binding_result.scalar_one_or_none()
-    if not binding:
-        binding = ParcelTagBinding(
-            pickup_binding_id=pickup_binding_id,
-            parcel_id=parcel.id,
-            tag_id=tag.id,
-            station_id=parcel.station_id,
-            status=ParcelTagBindingStatus.ACTIVE,
+async def apply_gateway_tag_exception_event(db: AsyncSession, station_id: int, payload: dict) -> None:
+    tag_ref = payload.get('tag_ref') or payload.get('tag_id') or 'UNKNOWN_TAG'
+    exception_type = payload.get('exception_type') or 'TAG_EXCEPTION'
+    severity = payload.get('severity') or 'WARNING'
+    message = payload.get('message') or f'Smart tag {tag_ref} reported {exception_type}.'
+    payload_station_id = optional_int(payload.get('station_id')) or station_id
+
+    staff_result = await db.execute(
+        select(User).where(
+            User.role.in_([UserRole.STAFF, UserRole.GATEWAY_ADMIN]),
+            (User.station_id == payload_station_id) | (User.station_id.is_(None)),
         )
-        db.add(binding)
-    elif event_type == 'TAG_RELEASED':
-        binding.status = ParcelTagBindingStatus.RELEASED
+    )
+    staff_users = list(staff_result.scalars().all())
+
+    for staff in staff_users:
+        db.add(
+            Notification(
+                user_id=staff.id,
+                parcel_id=None,
+                title=f'智能寻物标签异常：{severity}',
+                content=f'{message}（标签：{tag_ref}，类型：{exception_type}）',
+                type=NotificationType.IN_APP,
+                status=NotificationStatus.PENDING,
+            )
+        )
 
 
 async def apply_gateway_pickup_event(db: AsyncSession, gateway_id: int, station_id: int, payload: dict) -> None:
