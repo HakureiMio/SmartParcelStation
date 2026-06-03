@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -29,6 +29,31 @@ class HealthOut(BaseModel):
 class VersionOut(BaseModel):
     app: str
     version: str
+
+
+class AuthLoginIn(BaseModel):
+    role: str
+    username: str
+    password: str
+
+
+class AuthSessionOut(BaseModel):
+    token: str
+    user_id: str
+    role: str
+    display_name: str
+    station_id: str | None = None
+
+
+class AuthPlaceholderIn(BaseModel):
+    role: str | None = None
+    username: str | None = None
+    phone: str | None = None
+
+
+class AuthPlaceholderOut(BaseModel):
+    ok: bool
+    message: str
 
 
 class StationCreate(BaseModel):

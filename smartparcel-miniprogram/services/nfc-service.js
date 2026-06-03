@@ -1,4 +1,4 @@
-﻿const CONFIG = require('./config')
+const CONFIG = require('./config')
 const MOCK_TAG = { type:'SPS_SMART_TAG', payload_version:1, station_id:'1', tag_id:'TAG001', tag_nfc_id:'NFC_TAG_001' }
 function checkNfcAvailable() {
   if (typeof wx === 'undefined') return { available:false, reason:'非小程序环境' }

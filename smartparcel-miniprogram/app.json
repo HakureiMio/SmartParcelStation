@@ -1,6 +1,9 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/login/login",
+    "pages/register/register",
+    "pages/forgot-password/forgot-password",
     "pages/user-home/user-home",
     "pages/user-parcels/user-parcels",
     "pages/user-notifications/user-notifications",
@@ -14,10 +17,10 @@
     "pages/gateway-status/gateway-status"
   ],
   "window": {
-    "navigationBarTitleText": "SPS 原型",
-    "navigationBarBackgroundColor": "#0f6fff",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#f5f7fb"
+    "navigationBarTitleText": "SPS",
+    "navigationBarBackgroundColor": "#fbfcff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f6f8fc"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

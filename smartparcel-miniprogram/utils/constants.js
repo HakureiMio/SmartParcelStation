@@ -1,4 +1,4 @@
-﻿const PICKUP_STEPS = ['未到站', '已到站', '标签已唤醒', '待 NFC 确认', '已取件']
+const PICKUP_STEPS = ['未到站', '已到站', '标签已唤醒', '待 NFC 确认', '已取件']
 const EXCEPTION_TYPES = ['LOW_BATTERY', 'TAG_OFFLINE', 'TAG_WAKE_FAILED', 'TAMPER', 'MANUAL_CHECK_REQUIRED']
 const SEVERITIES = ['INFO', 'WARNING', 'ERROR', 'CRITICAL']
 module.exports = { PICKUP_STEPS, EXCEPTION_TYPES, SEVERITIES }

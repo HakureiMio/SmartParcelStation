@@ -1,3 +1,3 @@
-const CONFIG = require('../../services/config')
+const authService = require('../../services/auth-service')
 const serverApi = require('../../services/server-api')
-Page({ data:{ notifications:[], source:'mock' }, onLoad(){ serverApi.getUserNotifications(CONFIG.demoUserId).then(res=>this.setData({notifications:res.data||[], source:res.source})) } })
+Page({ data:{ notifications:[] }, onLoad(){ const session=authService.requireRole('client'); if(!session) return; serverApi.getUserNotifications(session.userId).then(res=>this.setData({notifications:res.data||[]})) } })

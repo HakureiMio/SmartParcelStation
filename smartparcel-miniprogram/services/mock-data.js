@@ -1,4 +1,4 @@
-﻿const mockGatewayHint = { access:'GRANTED', gateway_code:'GW001', station_id:'1', pickup_count:3, session_color:'BLUE', color_display_name:'蓝色', shelves:['A03','B12','C07'], display_text:'待取3件｜蓝色闪烁｜A03 B12 C07', warnings:[] }
+const mockGatewayHint = { access:'GRANTED', gateway_code:'GW001', station_id:'1', pickup_count:3, session_color:'BLUE', color_display_name:'蓝色', shelves:['A03','B12','C07'], display_text:'待取3件｜蓝色闪烁｜A03 B12 C07', warnings:[] }
 const parcels = [
   { parcel_code:'P20260602001', status:'WAITING_PICKUP', shelf_code:'A03', nfc_fast_pickup:true, tag_color:'蓝色', receiver_phone:'188****0002', receiver_name_masked:'张*' },
   { parcel_code:'P20260602002', status:'WAITING_PICKUP', shelf_code:'B12', nfc_fast_pickup:true, tag_color:'蓝色', receiver_phone:'188****0002', receiver_name_masked:'张*' },

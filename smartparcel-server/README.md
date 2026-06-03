@@ -369,3 +369,93 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
   - `docker compose down`
 - 停止 FastAPI（uvicorn）：
   - 在运行终端按 `Ctrl + C`
+
+## 13. 账号密码认证接口
+
+server 提供最小可用账号密码认证能力，用于微信小程序原型验证。账号密码保存在 server 数据库，小程序不保存明文密码。
+
+### 13.1 登录接口
+
+```http
+POST /api/v1/auth/login
+```
+
+请求示例：
+
+```json
+{
+  "role": "client",
+  "username": "user001",
+  "password": "123456"
+}
+```
+
+员工端：
+
+```json
+{
+  "role": "staff",
+  "username": "staff001",
+  "password": "123456"
+}
+```
+
+返回示例：
+
+```json
+{
+  "token": "demo-token-...",
+  "user_id": "2",
+  "role": "client",
+  "display_name": "用户 002",
+  "station_id": "1"
+}
+```
+
+规则：
+
+- 校验账号、密码和角色。
+- 密码错误返回 `401`。
+- 用户停用返回 `403`。
+- 不返回 `password_hash`。
+- 当前 token 为开发演示 token，生产环境应替换为正式 JWT 或服务端会话机制。
+
+### 13.2 注册与忘记密码预留接口
+
+```http
+POST /api/v1/auth/register
+POST /api/v1/auth/forgot-password
+```
+
+当前返回功能暂未开放提示，后续接入正式账号系统。
+
+### 13.3 密码哈希策略
+
+当前使用 Python 标准库实现：
+
+```text
+PBKDF2-HMAC-SHA256 + 独立 salt + 120000 次迭代
+```
+
+数据库保存格式：
+
+```text
+pbkdf2_sha256$120000$salt$base64_digest
+```
+
+不会保存明文密码。
+
+### 13.4 开发演示账号
+
+| 入口 | 用户名 | 密码 | 角色 | 用户 ID |
+| --- | --- | --- | --- | --- |
+| 客户端 | `user001` | `123456` | `client` / `USER` | `2` |
+| 员工端 | `staff001` | `123456` | `staff` / `STAFF` | `3` |
+
+这些账号只用于本地开发和毕业设计演示，不用于生产环境。
+
+### 13.5 小程序登录流程
+
+```text
+小程序启动页 -> 选择客户/员工入口 -> 登录页输入账号密码 -> /api/v1/auth/login -> 保存 token/role/user_id -> 跳转用户首页或员工工作台
+```

@@ -1,5 +1,13 @@
-﻿<view class="container">
-  <view class="card"><view class="title">SmartParcelStation 小程序原型</view><view class="subtitle">用户端 + 员工端双入口，支持 server/gateway/mock 演示。</view></view>
-  <view class="card"><view class="row"><text class="label">server</text><text class="value">{{CONFIG.serverBaseUrl}}</text></view><view class="row"><text class="label">gateway</text><text class="value">{{CONFIG.gatewayBaseUrl}}</text></view><view class="row"><text class="label">站点</text><text class="value">{{CONFIG.stationId}}</text></view><view class="row"><text class="label">mock fallback</text><text class="value">{{CONFIG.useMockWhenRequestFail}}</text></view></view>
-  <view class="grid"><button class="btn btn-primary" data-page="user-home" bindtap="go">用户入口</button><button class="btn btn-staff" data-page="staff-home" bindtap="go">员工入口</button><button class="btn" data-page="gateway-status" bindtap="go">网关状态</button><button class="btn btn-warn" data-page="staff-tag-nfc" bindtap="go">NFC 测试</button></view>
+<view class="landing">
+  <view class="particle p1"></view><view class="particle p2"></view><view class="particle p3"></view><view class="particle p4"></view><view class="particle p5"></view><view class="particle p6"></view><view class="particle p7"></view><view class="particle p8"></view><view class="particle p9"></view><view class="particle p10"></view><view class="particle p11"></view><view class="particle p12"></view>
+  <view class="hero">
+    <view class="logo-mark">S</view>
+    <view class="hero-title">智能快递站</view>
+    <view class="hero-subtitle">快速取件 · 智能寻物 · 本地网关协同</view>
+  </view>
+  <view class="entry-card">
+    <view class="entry-title">请选择入口</view>
+    <button class="entry-button client" data-role="client" bindtap="goLogin">客户入口</button>
+    <button class="entry-button staff" data-role="staff" bindtap="goLogin">员工入口</button>
+  </view>
 </view>

@@ -5,6 +5,10 @@ from app.core.config import get_settings
 from app.core.security import get_current_gateway, get_current_server_admin, get_current_server_admin_or_bootstrap, get_current_user_dev, verify_gateway_request
 from app.db.session import get_db
 from app.schemas.schemas import (
+    AuthLoginIn,
+    AuthPlaceholderIn,
+    AuthPlaceholderOut,
+    AuthSessionOut,
     GatewayEventIn,
     GatewayBootstrapActivateIn,
     GatewayBootstrapActivateOut,
@@ -46,6 +50,21 @@ async def health() -> HealthOut:
 @router.get('/version', response_model=VersionOut)
 async def version() -> VersionOut:
     return VersionOut(app=settings.app_name, version=settings.app_version)
+
+
+@router.post('/auth/login', response_model=AuthSessionOut)
+async def auth_login(payload: AuthLoginIn, db: AsyncSession = Depends(get_db)):
+    return await services.login_with_password(db, payload.role, payload.username, payload.password)
+
+
+@router.post('/auth/register', response_model=AuthPlaceholderOut)
+async def auth_register(_: AuthPlaceholderIn):
+    return AuthPlaceholderOut(ok=False, message='注册功能暂未开放')
+
+
+@router.post('/auth/forgot-password', response_model=AuthPlaceholderOut)
+async def auth_forgot_password(_: AuthPlaceholderIn):
+    return AuthPlaceholderOut(ok=False, message='忘记密码功能暂未开放')
 
 
 @router.post('/stations', response_model=StationOut)

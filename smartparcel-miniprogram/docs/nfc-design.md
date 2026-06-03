@@ -1,4 +1,4 @@
-﻿# NFC 设计说明
+# NFC 设计说明
 
 ## 标签 payload
 

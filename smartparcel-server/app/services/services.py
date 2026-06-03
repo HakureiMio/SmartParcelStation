@@ -1,6 +1,8 @@
-﻿import uuid
+import uuid
 import hashlib
 import secrets
+import hmac
+import base64
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -27,6 +29,58 @@ from app.models.models import Gateway, GatewayRegistrationToken, GatewaySyncEven
 
 def _not_found(name: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{name} not found')
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    effective_salt = salt or secrets.token_urlsafe(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), effective_salt.encode('utf-8'), 120_000)
+    return f'pbkdf2_sha256$120000${effective_salt}${base64.b64encode(digest).decode("ascii")}'
+
+
+def verify_password(password: str, password_hash: str | None) -> bool:
+    if not password_hash:
+        return False
+    try:
+        algorithm, iterations_text, salt, expected = password_hash.split('$', 3)
+        if algorithm != 'pbkdf2_sha256':
+            return False
+        digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), int(iterations_text))
+        return hmac.compare_digest(base64.b64encode(digest).decode('ascii'), expected)
+    except (ValueError, TypeError):
+        return False
+
+
+def normalize_login_role(role: str) -> UserRole:
+    normalized = role.strip().upper()
+    if normalized == 'CLIENT':
+        return UserRole.USER
+    if normalized == 'STAFF':
+        return UserRole.STAFF
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='账号或密码错误')
+
+
+def public_role(role: UserRole) -> str:
+    if role == UserRole.USER:
+        return 'client'
+    if role == UserRole.STAFF:
+        return 'staff'
+    return role.value.lower()
+
+
+async def login_with_password(db: AsyncSession, role: str, username: str, password: str) -> dict:
+    expected_role = normalize_login_role(role)
+    result = await db.execute(select(User).where(User.username == username.strip()))
+    user = result.scalar_one_or_none()
+    if not user or user.role != expected_role or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='账号或密码错误')
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='账号已停用')
+    return {
+        'token': f'demo-token-{user.id}-{secrets.token_urlsafe(24)}',
+        'user_id': str(user.id),
+        'role': public_role(user.role),
+        'display_name': user.display_name,
+        'station_id': str(user.station_id) if user.station_id is not None else None,
+    }
 
 
 async def create_station(db: AsyncSession, data: dict) -> Station:
@@ -68,22 +122,32 @@ async def patch_user(db: AsyncSession, user_id: int, data: dict) -> User:
 
 
 async def ensure_default_users(db: AsyncSession) -> list[User]:
+    default_station = await db.get(Station, 1)
+    if not default_station:
+        db.add(Station(id=1, station_code='ST001', name='主站点', address='示例路1号', status='ACTIVE'))
+        await db.flush()
+
     defaults = [
-        {'id': 1, 'display_name': 'Server Admin', 'phone': '18800000001', 'role': UserRole.SERVER_ADMIN},
-        {'id': 2, 'display_name': 'Demo User', 'phone': '18800000002', 'role': UserRole.USER},
-        {'id': 3, 'display_name': 'Station Staff', 'phone': '18800000003', 'role': UserRole.STAFF},
-        {'id': 4, 'display_name': 'Gateway Admin', 'phone': '18800000004', 'role': UserRole.GATEWAY_ADMIN},
+        {'id': 1, 'username': 'admin001', 'password': '123456', 'display_name': '系统管理员', 'phone': '18800000001', 'role': UserRole.SERVER_ADMIN, 'station_id': None},
+        {'id': 2, 'username': 'user001', 'password': '123456', 'display_name': '用户 002', 'phone': '18800000002', 'role': UserRole.USER, 'station_id': 1},
+        {'id': 3, 'username': 'staff001', 'password': '123456', 'display_name': '员工 001', 'phone': '18800000003', 'role': UserRole.STAFF, 'station_id': 1},
+        {'id': 4, 'username': 'gateway001', 'password': '123456', 'display_name': '网关管理员', 'phone': '18800000004', 'role': UserRole.GATEWAY_ADMIN, 'station_id': 1},
     ]
     users: list[User] = []
     for item in defaults:
         user = await db.get(User, item['id'])
+        password = item.pop('password')
         if user:
+            user.username = item['username']
             user.display_name = item['display_name']
             user.phone = item['phone']
             user.role = item['role']
+            user.station_id = item['station_id']
             user.is_active = True
+            if not user.password_hash:
+                user.password_hash = hash_password(password)
         else:
-            user = User(**item, is_active=True)
+            user = User(**item, password_hash=hash_password(password), is_active=True)
             db.add(user)
         users.append(user)
     await db.commit()

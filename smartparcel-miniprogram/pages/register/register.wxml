@@ -1,0 +1,1 @@
+<view class="container safe"><view class="card"><view class="title">注册账号</view><view class="subtitle">账号注册接口已预留，后续将接入服务器账号系统和微信登录。</view><button class="btn btn-primary" bindtap="submit">知道了</button></view></view>
