@@ -1,7 +1,7 @@
 #include "buzzer.h"
 
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -9,11 +9,19 @@ LOG_MODULE_REGISTER(buzzer, LOG_LEVEL_INF);
 
 #define BUZZER_ALERT_ON_MS     120U
 #define BUZZER_ALERT_OFF_MS    880U
-#define BUZZER_SHORT_ON_MS     80U
+#define BUZZER_SHORT_ON_MS     120U
 #define BUZZER_SHORT_OFF_MS    80U
 #define BUZZER_CRITICAL_ON_MS  600U
+#define BUZZER_DUTY_DIVIDER    2U
 
-static const struct gpio_dt_spec buzzer_gpio = GPIO_DT_SPEC_GET(DT_ALIAS(buzzer_ctrl), gpios);
+/*
+ * Burn verification helper:
+ * keep the passive buzzer PWM output low at boot. Comment this macro after
+ * verifying P0.16 stays low with a meter or scope.
+ */
+#define BUZZER_BOOT_TEST_DEFAULT_LOW 1
+
+static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(DT_ALIAS(buzzer_pwm));
 
 static struct k_work_delayable buzzer_work;
 static uint32_t buzzer_on_ms;
@@ -24,9 +32,11 @@ static bool buzzer_repeat;
 
 static void set_buzzer(bool enabled)
 {
-    if (gpio_is_ready_dt(&buzzer_gpio)) {
-        (void)gpio_pin_set_dt(&buzzer_gpio, enabled ? 1 : 0);
+    if (pwm_is_ready_dt(&buzzer_pwm)) {
+        uint32_t pulse = enabled ? (buzzer_pwm.period / BUZZER_DUTY_DIVIDER) : 0U;
+        (void)pwm_set_dt(&buzzer_pwm, buzzer_pwm.period, pulse);
     }
+
     buzzer_is_on = enabled;
 }
 
@@ -56,13 +66,17 @@ void buzzer_init(void)
 {
     k_work_init_delayable(&buzzer_work, buzzer_work_handler);
 
-    if (!gpio_is_ready_dt(&buzzer_gpio)) {
-        LOG_ERR("buzzer GPIO is not ready");
+    if (!pwm_is_ready_dt(&buzzer_pwm)) {
+        LOG_ERR("passive buzzer PWM is not ready");
         return;
     }
 
-    (void)gpio_pin_configure_dt(&buzzer_gpio, GPIO_OUTPUT_INACTIVE);
-    LOG_INF("buzzer init on P0.16");
+    set_buzzer(false);
+#if BUZZER_BOOT_TEST_DEFAULT_LOW
+    (void)pwm_set_dt(&buzzer_pwm, buzzer_pwm.period, 0U);
+    LOG_INF("burn test: passive buzzer PWM held low on P0.16");
+#endif
+    LOG_INF("passive buzzer PWM init on P0.16");
 }
 
 void buzzer_play(buzzer_pattern_t pattern)
@@ -98,12 +112,12 @@ void buzzer_play(buzzer_pattern_t pattern)
     }
 
     k_work_schedule(&buzzer_work, K_NO_WAIT);
-    LOG_INF("buzzer play pattern=%d", (int)pattern);
+    LOG_INF("passive buzzer play pattern=%d", (int)pattern);
 }
 
 void buzzer_stop(void)
 {
     k_work_cancel_delayable(&buzzer_work);
     set_buzzer(false);
-    LOG_INF("buzzer stop");
+    LOG_INF("passive buzzer stop");
 }

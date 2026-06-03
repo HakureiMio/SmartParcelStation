@@ -18,17 +18,18 @@ Confirm SWDIO, SWDCLK, VCC, and GND are connected to the debug probe. These pins
 - Reset the board.
 - Confirm logs include `clip node boot: EWT73-2G4M04S1A / E73-2G4M04S1A`.
 
-## 3. Test RGB PWM
+## 3. Test full-color RGB PWM
 
 - Send or mock `WAKE_TAG`.
 - Confirm blue finding blink on `P0.15`.
 - Use firmware effects or direct debug calls to confirm red `P0.11`, green `P0.12`, and blue `P0.15`.
+- Confirm the full-color RGB lamp mixes color through the R/G/B PWM voltage inputs.
 
-## 4. Test buzzer switch
+## 4. Test passive buzzer PWM
 
 - Send or mock `WAKE_TAG`.
-- Confirm intermittent buzzer output on `P0.16`.
-- Send or mock `STOP_ALERT` and confirm the buzzer turns off immediately.
+- Confirm intermittent PWM tone output on `P0.16`.
+- Send or mock `STOP_ALERT` and confirm the PWM output turns off immediately.
 
 ## 5. Test clip contact input
 
