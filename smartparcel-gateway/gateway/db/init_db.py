@@ -10,6 +10,7 @@ def init_db() -> None:
         parcel_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(local_parcels)"))}
         parcel_additions = {
             "receiver_name_masked": "ALTER TABLE local_parcels ADD COLUMN receiver_name_masked VARCHAR(128)",
+            "shelf_code": "ALTER TABLE local_parcels ADD COLUMN shelf_code VARCHAR(64)",
             "origin": "ALTER TABLE local_parcels ADD COLUMN origin VARCHAR(64) DEFAULT 'LOCAL_ONLY'",
             "sync_status": "ALTER TABLE local_parcels ADD COLUMN sync_status VARCHAR(64) DEFAULT 'LOCAL_ONLY'",
         }
@@ -37,6 +38,9 @@ def init_db() -> None:
         binding_additions = {
             "released_at": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN released_at DATETIME",
             "release_reason": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN release_reason VARCHAR(128)",
+            "last_wake_session_id": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN last_wake_session_id VARCHAR(64)",
+            "last_wake_color": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN last_wake_color VARCHAR(32)",
+            "last_wake_at": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN last_wake_at DATETIME",
         }
         for column, statement in binding_additions.items():
             if column not in binding_columns:

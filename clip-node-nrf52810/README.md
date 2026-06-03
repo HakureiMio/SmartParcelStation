@@ -211,6 +211,29 @@ west flash
 - `SET_BINDING`：写入测试绑定信息
 - `CLEAR_BINDING`：清除测试绑定信息
 
+gateway 在门禁取件会话中下发 `WAKE_TAG` 时，payload 语义如下。标签固件仍使用轻量二进制帧承载这些字段，以下 JSON 仅用于文档说明：
+
+```json
+{
+  "cmd": "WAKE_TAG",
+  "tag_id": "TAG001",
+  "pickup_session_id": "sess_xxx",
+  "led_color": "BLUE",
+  "blink_pattern": "SLOW",
+  "beep_pattern": "SHORT_INTERVAL",
+  "duration_sec": 30
+}
+```
+
+标签端行为：
+
+- 按 `led_color` 控制全彩 RGB 三针 PWM 输出。
+- 按 `blink_pattern` 执行闪烁模式。
+- 按 `beep_pattern` 控制无源蜂鸣器 PWM 方波。
+- 到达 `duration_sec` 后自动停止。
+- 收到 `STOP_ALERT` 后立即关闭 RGB 和蜂鸣器。
+- 不保存用户、包裹、货架号等隐私信息。
+
 预期行为：
 
 - `WAKE_TAG` 后进入 `alerting`

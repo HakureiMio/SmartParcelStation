@@ -293,6 +293,37 @@ def test_tag_status_report_sync_is_audit_only_and_does_not_create_tag():
     asyncio.run(check_db())
 
 
+def test_gate_access_and_tag_wake_sync_events_are_audit_only():
+    items = [
+        {
+            'event_id': uuid.uuid4().hex,
+            'event_type': 'NFC_ACCESS_GRANTED',
+            'payload_json': {'reader_id': 'GATE01', 'pickup_session_id': 'sess_1', 'session_color': 'BLUE'},
+        },
+        {
+            'event_id': uuid.uuid4().hex,
+            'event_type': 'NFC_ACCESS_DENIED',
+            'payload_json': {'reader_id': 'GATE01', 'reason': 'CREDENTIAL_NOT_FOUND'},
+        },
+        {
+            'event_id': uuid.uuid4().hex,
+            'event_type': 'TAG_WAKE_STARTED',
+            'payload_json': {'pickup_session_id': 'sess_1', 'tag_refs': ['TAG001'], 'session_color': 'BLUE'},
+        },
+    ]
+    response = sync_push(items)
+    assert response.status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            sync_events = (await db.execute(select(GatewaySyncEvent))).scalars().all()
+            tags = (await db.execute(select(Tag))).scalars().all()
+            assert {event.event_type for event in sync_events} == {'NFC_ACCESS_GRANTED', 'NFC_ACCESS_DENIED', 'TAG_WAKE_STARTED'}
+            assert tags == []
+
+    asyncio.run(check_db())
+
+
 def admin_headers():
     return {'X-Dev-User-Id': '1', 'X-Dev-Role': 'SERVER_ADMIN'}
 

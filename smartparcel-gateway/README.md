@@ -226,7 +226,104 @@ python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phon
 python -m gateway.main sync-push
 ```
 
-## 12. 公网 HTTPS 与 HMAC 签名
+## 12. 门禁本地 API 与小屏显示流程
+
+门禁读卡器/门禁控制器作为 gateway 本地子终端，默认通过局域网直连 gateway，不访问公网 server。gateway 本地完成用户认证、放行裁决、标签唤醒和小屏显示内容生成；弱网或 server 临时不可用时，门禁放行和寻物仍可继续。
+
+核心规则：
+
+- 颜色不是包裹唯一编号；颜色是本次取件会话的视觉辅助。
+- 货架号是空间定位依据。
+- NFC/标签绑定关系是最终确认依据。
+- 同一用户多个包裹只分配一个 `session_color`，所有标签同色闪烁，用 `shelf_code` 显示多个位置。
+- 有待取包裹但缺少标签绑定时，当前策略是允许放行，返回 `warnings=["NO_ACTIVE_TAG_BINDING"]`，小屏显示货架号并提示人工确认。
+
+### 12.1 CLI 测试
+
+```powershell
+python -m gateway.main register-nfc-credential --credential-type CARD_UID --credential-value CARD_UID_001 --user-id 2
+python -m gateway.main inbound-parcel --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --receiver-user-id 2 --receiver-name-masked "张*" --shelf-code A03
+python -m gateway.main register-tag --tag-id TAG001
+python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
+python -m gateway.main gate-access --reader-id GATE01 --credential-type CARD_UID --credential-value CARD_UID_001
+```
+
+返回字段包括：
+
+- `access`：`GRANTED` 或 `DENIED`
+- `pickup_session_id`：本次取件会话 ID
+- `pickup_count`：待取包裹数量
+- `session_color` / `color_display_name`：本次会话统一颜色
+- `shelves`：货架号列表
+- `display_text`：门禁小屏显示文本
+- `items`：包裹、货架、标签和唤醒结果
+- `warnings`：缺少标签绑定、唤醒失败等提示
+
+### 12.2 本地 HTTP API
+
+启动：
+
+```powershell
+python -m gateway.main local-api --host 0.0.0.0 --port 19000
+```
+
+健康检查：
+
+```http
+GET /local/health
+```
+
+门禁读卡：
+
+```http
+POST /local/gate/access-card
+```
+
+请求：
+
+```json
+{
+  "reader_id": "GATE01",
+  "credential_type": "CARD_UID",
+  "credential_value": "04A1B2C3D4"
+}
+```
+
+示例响应：
+
+```json
+{
+  "access": "GRANTED",
+  "reader_id": "GATE01",
+  "user_id": "2",
+  "pickup_session_id": "sess_xxx",
+  "pickup_count": 3,
+  "session_color": "BLUE",
+  "color_display_name": "蓝色",
+  "blink_pattern": "SLOW",
+  "shelves": ["A03", "B12", "C07"],
+  "display_text": "待取3件｜蓝色闪烁｜A03 B12 C07",
+  "items": [
+    {
+      "parcel_code": "P20260602001",
+      "shelf_code": "A03",
+      "tag_id": "TAG001",
+      "wake_result": "OK"
+    }
+  ],
+  "warnings": []
+}
+```
+
+同步事件说明：
+
+- `NFC_ACCESS_GRANTED`：门禁放行审计。
+- `NFC_ACCESS_DENIED`：门禁拒绝审计。
+- `TAG_WAKE_STARTED`：标签唤醒任务启动审计。
+
+这些事件进入 `sync_queue` 后由 `sync-push` 异步上传 server。payload 不包含完整标签状态、电池、BLE 地址、固件版本等本地主数据。
+
+## 13. 公网 HTTPS 与 HMAC 签名
 
 公网实验时推荐把 `SERVER_BASE_URL` 改为 HTTPS 域名，例如：
 
@@ -254,7 +351,7 @@ gateway 请求会自动附带：
 
 普通 HTTPS 用来验证服务器证书并加密传输；HMAC 用来证明 gateway 身份并保证消息完整性。mTLS 后续可选，本阶段不强制。
 
-## 13. 与 smartparcel-server 接口约定
+## 14. 与 smartparcel-server 接口约定
 
 已封装：
 - `GET /api/v1/health`
@@ -265,7 +362,7 @@ gateway 请求会自动附带：
 - `POST /api/v1/tags/status-report` 已删除；实体智能寻物标签阶段不使用 server 标签状态上报接口。
 - `POST /api/v1/pickup/confirm`（预留）
 
-## 14. 迁移公网服务器时只需修改
+## 15. 迁移公网服务器时只需修改
 
 - `SERVER_BASE_URL` 改为 `https://...`
 - `MQTT_HOST` / `MQTT_PORT` 指向公网 Broker
@@ -279,10 +376,13 @@ gateway 请求会自动附带：
 - `python -m gateway.main sync-push`
 - `python -m gateway.main heartbeat`
 - `python -m gateway.main inbound-parcel`
+- `python -m gateway.main register-nfc-credential`
 - `python -m gateway.main register-tag`
 - `python -m gateway.main bind-tag`
 - `python -m gateway.main release-tag`
 - `python -m gateway.main report-tag-exception`
+- `python -m gateway.main gate-access`
+- `python -m gateway.main local-api`
 - `python -m gateway.main confirm-pickup`
 - `python -m gateway.main run`
 - `python -m gateway.main mock-nfc CARD_UID`

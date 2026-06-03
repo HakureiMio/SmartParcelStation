@@ -224,6 +224,7 @@ server 收到以下事件时会落业务：
 - `GATEWAY_INBOUND` / `PARCEL_ARRIVED` / `INBOUND_PARCEL`：按 `parcel_code` 合并预录入包裹，或新建 `GATEWAY_INBOUND` 来源包裹。
 - `TAG_EXCEPTION_REPORTED`：接收 gateway 判断后的标签异常摘要，生成站点工作人员通知和同步审计，不更新标签实时状态。
 - `PICKUP_CONFIRMED` / `OFFLINE_PICKUP` / `NFC_FAST_PICKUP_CONFIRMED`：更新包裹为 `PICKED_UP`，记录 pickup event；payload 中的 `pickup_method = TAG_NFC_FAST` 用于审计智能寻物标签 NFC 快速取件。
+- `NFC_ACCESS_GRANTED` / `NFC_ACCESS_DENIED` / `TAG_WAKE_STARTED`：只保存 `GatewaySyncEvent` 审计，不参与门禁实时放行，不更新包裹或标签状态。
 - `TAG_BOUND` / `TAG_RELEASED`：仅保留兼容旧 mock 或可选业务审计语义，不生成标签实时状态表或管理视图。
 - `TAG_STATUS_REPORT`：deprecated，仅兼容旧 mock；实体智能寻物标签阶段不作为常规同步事件上传 server。
 
@@ -235,6 +236,14 @@ server 只保留两类标签相关业务信息：
 
 - `TAG_EXCEPTION_REPORTED`：由 gateway 判断并上传异常摘要，server 生成 `STAFF` / `GATEWAY_ADMIN` 工作人员通知和同步事件审计。
 - 取件审计：`PICKUP_CONFIRMED`、`OFFLINE_PICKUP` 或兼容的 `NFC_FAST_PICKUP_CONFIRMED` 中保留 `pickup_method`；智能寻物标签 NFC 快速取件统一使用 `TAG_NFC_FAST`。
+
+门禁本地放行相关事件由 gateway 异步上传，server 只做审计：
+
+- `NFC_ACCESS_GRANTED`
+- `NFC_ACCESS_DENIED`
+- `TAG_WAKE_STARTED`
+
+这些事件不生成 server 标签状态，不创建 `Tag` / `ParcelTagBinding`，也不作为门禁实时裁决依据。
 
 原则：标签日常状态不上云，标签异常才上报；标签控制不上云，取件结果才上报。
 

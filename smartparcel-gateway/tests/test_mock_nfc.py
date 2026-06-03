@@ -1,4 +1,5 @@
 import json
+import uuid
 from gateway.core.config import reload_settings
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
@@ -30,14 +31,19 @@ def test_mock_nfc_creates_tag_wake_task():
     settings = reload_settings()
     init_db()
     db = SessionLocal()
+    card_uid = f"CARD-{uuid.uuid4().hex}"
+    user_id = f"u-{uuid.uuid4().hex}"
+    parcel_id = f"sp-{uuid.uuid4().hex}"
+    binding_id = f"pb-{uuid.uuid4().hex}"
+    tag_id = f"tag-{uuid.uuid4().hex}"
     try:
-        db.add(LocalNfcCredential(credential_type=CredentialType.CARD_UID, credential_value="CARD_1", user_id="u1", station_id=settings.station_id, status=CredentialStatus.ACTIVE))
-        db.add(LocalParcel(server_parcel_id="sp1", parcel_code="p1", receiver_user_id="u1", station_id=settings.station_id, status=ParcelStatus.WAITING_PICKUP))
-        db.add(LocalParcelTagBinding(pickup_binding_id="pb1", server_parcel_id="sp1", tag_id="tag-1", station_id=settings.station_id))
+        db.add(LocalNfcCredential(credential_type=CredentialType.CARD_UID, credential_value=card_uid, user_id=user_id, station_id=settings.station_id, status=CredentialStatus.ACTIVE))
+        db.add(LocalParcel(server_parcel_id=parcel_id, parcel_code=f"p-{uuid.uuid4().hex}", receiver_user_id=user_id, station_id=settings.station_id, status=ParcelStatus.WAITING_PICKUP))
+        db.add(LocalParcelTagBinding(pickup_binding_id=binding_id, server_parcel_id=parcel_id, tag_id=tag_id, station_id=settings.station_id))
         db.commit()
 
         svc = MockNfcService(db, SyncService(db, DummyClient(settings), settings.station_id), TaskService(db), MockBleService())
-        result = svc.handle_card("CARD_1")
+        result = svc.handle_card(card_uid)
         assert result["ok"] is True
         tasks = TaskService(db).list_tasks()
         assert any(t.task_type == TaskType.TAG_WAKE for t in tasks)

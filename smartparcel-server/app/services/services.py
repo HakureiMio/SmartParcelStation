@@ -381,6 +381,8 @@ async def apply_gateway_business_event(db: AsyncSession, gateway_id: int, statio
         await apply_gateway_tag_exception_event(db, station_id, payload)
     elif normalized in {'TAG_BOUND', 'TAG_RELEASED', 'TAG_STATUS_REPORT'}:
         await apply_gateway_tag_event(db, station_id, normalized, payload)
+    elif normalized in {'NFC_ACCESS_GRANTED', 'NFC_ACCESS_DENIED', 'TAG_WAKE_STARTED'}:
+        return
     elif normalized in {'PICKUP_CONFIRMED', 'OFFLINE_PICKUP', 'NFC_FAST_PICKUP_CONFIRMED'}:
         await apply_gateway_pickup_event(db, gateway_id, station_id, payload)
 

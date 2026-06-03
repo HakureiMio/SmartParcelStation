@@ -111,6 +111,13 @@ class SyncQueueStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class PickupSessionStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+
+
 class LocalParcel(Base):
     __tablename__ = "local_parcels"
 
@@ -121,6 +128,7 @@ class LocalParcel(Base):
     receiver_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     receiver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     receiver_name_masked: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    shelf_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     origin: Mapped[str] = mapped_column(String(64), default="LOCAL_ONLY")
     sync_status: Mapped[str] = mapped_column(String(64), default="LOCAL_ONLY")
     station_id: Mapped[str] = mapped_column(String(64), index=True)
@@ -168,6 +176,9 @@ class LocalParcelTagBinding(Base):
     status: Mapped[BindingStatus] = mapped_column(Enum(BindingStatus), default=BindingStatus.ACTIVE)
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     release_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_wake_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_wake_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_wake_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -199,6 +210,25 @@ class LocalPickupEvent(Base):
     payload_json: Mapped[str] = mapped_column(Text)
     sync_status: Mapped[EventSyncStatus] = mapped_column(Enum(EventSyncStatus), default=EventSyncStatus.PENDING_UPLOAD)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LocalPickupSession(Base):
+    __tablename__ = "local_pickup_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    credential_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    credential_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    session_color: Mapped[str] = mapped_column(String(32))
+    pickup_count: Mapped[int] = mapped_column(Integer, default=0)
+    shelf_summary: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    display_text: Mapped[str] = mapped_column(Text)
+    status: Mapped[PickupSessionStatus] = mapped_column(Enum(PickupSessionStatus), default=PickupSessionStatus.ACTIVE)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 

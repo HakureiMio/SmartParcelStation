@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 import time
 import shutil
+import json
 from pathlib import Path
 from datetime import datetime
 from sqlalchemy import select
@@ -14,9 +15,10 @@ from gateway.core.logging import setup_logging
 from gateway.console import setup_utf8_console
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
-from gateway.models.entities import BindingStatus, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType, TagStatus
+from gateway.models.entities import BindingStatus, CredentialStatus, CredentialType, LocalNfcCredential, LocalParcel, LocalParcelTagBinding, LocalTag, ParcelStatus, PickupEventType, TagStatus
 from gateway.mqtt.client import GatewayMqttClient
 from gateway.mqtt.handlers import handle_server_command
+from gateway.services.access_control_service import AccessControlService
 from gateway.services.heartbeat_service import HeartbeatService
 from gateway.services.mock_ble_service import MockBleService
 from gateway.services.mock_nfc_service import MockNfcService
@@ -158,6 +160,7 @@ def cli_inbound_parcel(
     pickup_code: str | None = typer.Option(None),
     receiver_user_id: str | None = typer.Option(None),
     receiver_name_masked: str | None = typer.Option(None),
+    shelf_code: str | None = typer.Option(None),
 ):
     _prepare_console()
     settings = get_settings()
@@ -173,6 +176,7 @@ def cli_inbound_parcel(
                 receiver_user_id=receiver_user_id,
                 receiver_phone=receiver_phone,
                 receiver_name_masked=receiver_name_masked,
+                shelf_code=shelf_code,
                 station_id=settings.station_id,
                 status=ParcelStatus.WAITING_PICKUP,
                 origin="GATEWAY_INBOUND",
@@ -184,6 +188,7 @@ def cli_inbound_parcel(
             parcel.receiver_user_id = receiver_user_id or parcel.receiver_user_id
             parcel.receiver_phone = receiver_phone
             parcel.receiver_name_masked = receiver_name_masked or parcel.receiver_name_masked
+            parcel.shelf_code = shelf_code or parcel.shelf_code
             parcel.status = ParcelStatus.WAITING_PICKUP
             parcel.origin = "GATEWAY_INBOUND"
             parcel.sync_status = "SYNC_PENDING"
@@ -198,6 +203,7 @@ def cli_inbound_parcel(
                     "pickup_code": pickup_code,
                     "receiver_user_id": receiver_user_id,
                     "receiver_name_masked": receiver_name_masked,
+                    "shelf_code": shelf_code,
                     "station_id": settings.station_id,
                 },
             }
@@ -315,6 +321,44 @@ def cli_register_tag(
             tag.registered_at = tag.registered_at or datetime.utcnow()
         db.commit()
         typer.echo(f"tag registered locally: {tag_id}")
+    finally:
+        db.close()
+
+
+@app.command("register-nfc-credential")
+def cli_register_nfc_credential(
+    credential_value: str = typer.Option(..., "--credential-value", "--card-uid", prompt=True),
+    user_id: str = typer.Option(...),
+    credential_type: str = typer.Option("CARD_UID"),
+):
+    _prepare_console()
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    try:
+        credential_type_value = CredentialType(credential_type.upper())
+    except ValueError as exc:
+        raise typer.BadParameter(f"unsupported credential_type: {credential_type}") from exc
+    db = SessionLocal()
+    try:
+        credential = db.scalar(select(LocalNfcCredential).where(
+            LocalNfcCredential.credential_type == credential_type_value,
+            LocalNfcCredential.credential_value == credential_value,
+            LocalNfcCredential.station_id == settings.station_id,
+        ))
+        if credential is None:
+            credential = LocalNfcCredential(
+                credential_type=credential_type_value,
+                credential_value=credential_value,
+                user_id=user_id,
+                station_id=settings.station_id,
+                status=CredentialStatus.ACTIVE,
+            )
+            db.add(credential)
+        else:
+            credential.user_id = user_id
+            credential.status = CredentialStatus.ACTIVE
+        db.commit()
+        typer.echo(f"nfc credential registered locally: {credential_type_value.value} {credential_value} -> user {user_id}")
     finally:
         db.close()
 
@@ -476,6 +520,45 @@ def cli_mock_nfc(card_uid: str):
         db.close()
 
 
+@app.command("gate-access")
+def cli_gate_access(
+    reader_id: str = typer.Option("GATE01"),
+    card_uid: str | None = typer.Option(None, help="Shortcut for --credential-type CARD_UID --credential-value"),
+    credential_type: str = typer.Option("CARD_UID"),
+    credential_value: str | None = typer.Option(None),
+):
+    _prepare_console()
+    settings = get_settings()
+    setup_logging(settings.log_level)
+    value = credential_value or card_uid
+    if not value:
+        raise typer.BadParameter("pass --card-uid or --credential-value")
+    db = SessionLocal()
+    try:
+        service = AccessControlService(
+            db,
+            SyncService(db, ServerClient(settings), settings.station_id),
+            TaskService(db),
+            MockBleService(),
+            settings.station_id,
+        )
+        result = service.handle_access_card(reader_id=reader_id, credential_type=credential_type, credential_value=value)
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    finally:
+        db.close()
+
+
+@app.command("local-api")
+def cli_local_api(
+    host: str = typer.Option("0.0.0.0"),
+    port: int = typer.Option(19000),
+):
+    _prepare_console()
+    import uvicorn
+
+    uvicorn.run("gateway.local_api:app", host=host, port=port, reload=False)
+
+
 @app.command("list-parcels")
 def cli_list_parcels(limit: int = 50):
     _prepare_console()
@@ -483,7 +566,7 @@ def cli_list_parcels(limit: int = 50):
     try:
         rows = list(db.scalars(select(LocalParcel).order_by(LocalParcel.created_at.desc()).limit(limit)))
         for r in rows:
-            typer.echo(f"{r.server_parcel_id} {r.parcel_code} {r.status}")
+            typer.echo(f"{r.server_parcel_id} {r.parcel_code} {r.status} shelf={r.shelf_code}")
     finally:
         db.close()
 
