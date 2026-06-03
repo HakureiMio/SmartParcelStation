@@ -1,0 +1,3 @@
+﻿const gatewayApi = require('../../services/gateway-api')
+function pretty(value){ return value ? JSON.stringify(value, null, 2) : '' }
+Page({ data:{ fields:[['parcelCode','包裹编号'],['receiverPhone','收件人手机号'],['pickupCode','取件码'],['receiverUserId','收件用户 ID'],['receiverNameMasked','收件人脱敏名'],['shelfCode','货架号']], form:{ parcelCode:'P20260602001', receiverPhone:'18800000002', pickupCode:'123456', receiverUserId:'2', receiverNameMasked:'张*', shelfCode:'A03' }, resultText:'', source:'mock' }, input(e){ this.setData({[`form.${e.currentTarget.dataset.key}`]: e.detail.value}) }, submit(){ gatewayApi.inboundParcel(this.data.form).then(res=>this.setData({resultText:pretty(res.data), source:res.source})) } })

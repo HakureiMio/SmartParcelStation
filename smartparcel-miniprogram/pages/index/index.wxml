@@ -1,0 +1,5 @@
+﻿<view class="container">
+  <view class="card"><view class="title">SmartParcelStation 小程序原型</view><view class="subtitle">用户端 + 员工端双入口，支持 server/gateway/mock 演示。</view></view>
+  <view class="card"><view class="row"><text class="label">server</text><text class="value">{{CONFIG.serverBaseUrl}}</text></view><view class="row"><text class="label">gateway</text><text class="value">{{CONFIG.gatewayBaseUrl}}</text></view><view class="row"><text class="label">站点</text><text class="value">{{CONFIG.stationId}}</text></view><view class="row"><text class="label">mock fallback</text><text class="value">{{CONFIG.useMockWhenRequestFail}}</text></view></view>
+  <view class="grid"><button class="btn btn-primary" data-page="user-home" bindtap="go">用户入口</button><button class="btn btn-staff" data-page="staff-home" bindtap="go">员工入口</button><button class="btn" data-page="gateway-status" bindtap="go">网关状态</button><button class="btn btn-warn" data-page="staff-tag-nfc" bindtap="go">NFC 测试</button></view>
+</view>

@@ -1,0 +1,4 @@
+﻿const CONFIG = require('../../services/config')
+const nfc = require('../../services/nfc-service')
+function pretty(value){ return value ? JSON.stringify(value, null, 2) : '' }
+Page({ data:{ available:null, payload:{ type:'SPS_SMART_TAG', payload_version:1, station_id:CONFIG.stationId, tag_id:'TAG001', tag_nfc_id:'NFC_TAG_001' }, payloadText:'', resultText:'' }, onLoad(){ this.refreshText(); this.setData({available:nfc.checkNfcAvailable()}) }, refreshText(){ this.setData({payloadText:pretty(this.data.payload)}) }, input(e){ this.setData({[`payload.${e.currentTarget.dataset.key}`]: e.detail.value}, () => this.refreshText()) }, read(){ nfc.readTag().then(res=>this.setData({resultText:pretty(res)})) }, write(){ wx.showModal({ title:'确认写入', content:this.data.payloadText, success:(m)=>{ if(m.confirm) nfc.writeTag(this.data.payload).then(res=>this.setData({resultText:pretty(res)})) } }) }, mock(){ this.setData({resultText:pretty(nfc.mockReadTag())}) } })

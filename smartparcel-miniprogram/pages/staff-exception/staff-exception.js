@@ -1,0 +1,4 @@
+﻿const gatewayApi = require('../../services/gateway-api')
+const { EXCEPTION_TYPES, SEVERITIES } = require('../../utils/constants')
+function pretty(value){ return value ? JSON.stringify(value, null, 2) : '' }
+Page({ data:{ types:EXCEPTION_TYPES, severities:SEVERITIES, typeIndex:0, severityIndex:1, form:{ tagId:'TAG001', message:'智能寻物标签电量偏低' }, resultText:'', source:'mock' }, input(e){ this.setData({[`form.${e.currentTarget.dataset.key}`]:e.detail.value}) }, pickType(e){ this.setData({typeIndex:Number(e.detail.value)}) }, pickSeverity(e){ this.setData({severityIndex:Number(e.detail.value)}) }, submit(){ const payload={...this.data.form, exceptionType:this.data.types[this.data.typeIndex], severity:this.data.severities[this.data.severityIndex]}; gatewayApi.reportTagException(payload).then(res=>this.setData({resultText:pretty(res.data), source:res.source})) } })

@@ -1,0 +1,6 @@
+﻿const CONFIG = require('../../services/config')
+const nfc = require('../../services/nfc-service')
+const serverApi = require('../../services/server-api')
+const gatewayApi = require('../../services/gateway-api')
+function pretty(value){ return value ? JSON.stringify(value, null, 2) : '' }
+Page({ data:{ raw:'', parsed:null, parsedText:'暂无读取结果', resultText:'', source:'mock' }, read(){ nfc.readTag().then(res=>this.setData({raw:res.raw || '', parsed:res.parsed || null, parsedText:pretty(res.parsed), resultText:pretty(res), source:res.source || 'nfc'})) }, input(e){ const raw=e.detail.value; const parsed=nfc.parseTagPayload(raw); this.setData({raw, parsed:parsed.parsed || null, parsedText:pretty(parsed.parsed) || parsed.reason, resultText:pretty(parsed)}) }, confirmServer(){ serverApi.confirmTagNfcFastPickup({userId:CONFIG.demoUserId, stationId:CONFIG.stationId, tagNfcPayload:this.data.parsed, pickupMethod:'TAG_NFC_FAST'}).then(res=>this.setData({resultText:pretty(res.data), source:res.source})) }, confirmGateway(){ gatewayApi.tagNfcFastPickup({userId:CONFIG.demoUserId, stationId:CONFIG.stationId, tagNfcPayload:this.data.parsed, pickupMethod:'TAG_NFC_FAST'}).then(res=>this.setData({resultText:pretty(res.data), source:res.source})) } })

@@ -1,0 +1,1 @@
+﻿<view class="container"><view class="title">通知</view><view class="card" wx:for="{{notifications}}" wx:key="id"><view class="badge">{{item.type}}</view><view class="title">{{item.title}}</view><view class="subtitle">{{item.content}}</view><view class="source">{{item.time}}</view></view><view class="source">数据来源：{{source}}</view></view>

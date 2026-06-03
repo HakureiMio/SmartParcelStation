@@ -1,0 +1,24 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/user-home/user-home",
+    "pages/user-parcels/user-parcels",
+    "pages/user-notifications/user-notifications",
+    "pages/user-pickup-status/user-pickup-status",
+    "pages/user-nfc-fast-pickup/user-nfc-fast-pickup",
+    "pages/staff-home/staff-home",
+    "pages/staff-inbound/staff-inbound",
+    "pages/staff-tag-bind/staff-tag-bind",
+    "pages/staff-tag-nfc/staff-tag-nfc",
+    "pages/staff-exception/staff-exception",
+    "pages/gateway-status/gateway-status"
+  ],
+  "window": {
+    "navigationBarTitleText": "SPS 原型",
+    "navigationBarBackgroundColor": "#0f6fff",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f5f7fb"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

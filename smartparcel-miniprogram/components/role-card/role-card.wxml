@@ -1,0 +1,1 @@
+<view class="mini-card" bindtap="tap"><view class="name">{{title || item.parcel_code || status}}</view><view class="desc">{{subtitle || item.status || item.shelf_code}}</view></view>

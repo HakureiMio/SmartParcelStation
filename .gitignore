@@ -45,6 +45,8 @@ logs/
 build/
 build_*/
 out/
+node_modules/
+miniprogram_npm/
 .west/
 dist/
 *.egg-info/
