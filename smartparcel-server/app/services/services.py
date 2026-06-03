@@ -20,7 +20,6 @@ from app.models.enums import (
     PickupEventType,
     SyncDirection,
     SyncStatus,
-    TagStatus,
     UserRole,
 )
 from app.models.models import Gateway, GatewayRegistrationToken, GatewaySyncEvent, Notification, Parcel, ParcelTagBinding, PickupEvent, Station, Tag, User
@@ -334,102 +333,6 @@ async def patch_parcel_status(db: AsyncSession, parcel_id: int, status_value: Pa
     await db.commit()
     await db.refresh(parcel)
     return parcel
-
-
-async def create_tag(db: AsyncSession, data: dict) -> Tag:
-    existing = await db.execute(select(Tag).where(Tag.tag_id == data['tag_id']))
-    tag = existing.scalar_one_or_none()
-    if tag:
-        for key, value in data.items():
-            setattr(tag, key, value)
-    else:
-        tag = Tag(**data)
-        db.add(tag)
-    await db.commit()
-    await db.refresh(tag)
-    return tag
-
-
-async def list_tags(db: AsyncSession) -> list[Tag]:
-    result = await db.execute(select(Tag).order_by(Tag.id.desc()))
-    return list(result.scalars().all())
-
-
-async def get_tag_by_pk(db: AsyncSession, tag_pk: int) -> Tag:
-    tag = await db.get(Tag, tag_pk)
-    if not tag:
-        raise _not_found('tag')
-    return tag
-
-
-async def bind_tag_to_parcel(db: AsyncSession, parcel_id: int, tag_code: str, station_id: int) -> ParcelTagBinding:
-    parcel = await get_parcel(db, parcel_id)
-    tag_result = await db.execute(select(Tag).where(Tag.tag_id == tag_code))
-    tag = tag_result.scalar_one_or_none()
-    if not tag:
-        raise _not_found('tag')
-
-    binding = ParcelTagBinding(
-        pickup_binding_id=uuid.uuid4().hex,
-        parcel_id=parcel.id,
-        tag_id=tag.id,
-        station_id=station_id,
-        status=ParcelTagBindingStatus.ACTIVE,
-    )
-    parcel.status = ParcelStatus.WAITING_PICKUP
-    db.add(binding)
-
-    if parcel.receiver_user_id:
-        db.add(
-            Notification(
-                user_id=parcel.receiver_user_id,
-                parcel_id=parcel.id,
-                title='Parcel ready for pickup',
-                content=f'Parcel {parcel.parcel_code} is waiting for pickup.',
-                type=NotificationType.IN_APP,
-                status=NotificationStatus.PENDING,
-            )
-        )
-
-    sync = GatewaySyncEvent(
-        event_id=uuid.uuid4().hex,
-        gateway_id=1,
-        station_id=station_id,
-        event_type='PARCEL_BIND',
-        direction=SyncDirection.SERVER_TO_GATEWAY,
-        payload_json={'parcel_id': parcel.id, 'tag_id': tag.tag_id, 'pickup_binding_id': binding.pickup_binding_id},
-        status=SyncStatus.PENDING,
-        retry_count=0,
-    )
-    db.add(sync)
-
-    await db.commit()
-    await db.refresh(binding)
-    return binding
-
-
-async def release_binding(db: AsyncSession, pickup_binding_id: str) -> ParcelTagBinding:
-    result = await db.execute(select(ParcelTagBinding).where(ParcelTagBinding.pickup_binding_id == pickup_binding_id))
-    binding = result.scalar_one_or_none()
-    if not binding:
-        raise _not_found('binding')
-    binding.status = ParcelTagBindingStatus.RELEASED
-    await db.commit()
-    await db.refresh(binding)
-    return binding
-
-
-async def report_tag_status(db: AsyncSession, tag_code: str, status_value, battery_level: int | None) -> Tag:
-    result = await db.execute(select(Tag).where(Tag.tag_id == tag_code))
-    tag = result.scalar_one_or_none()
-    if not tag:
-        raise _not_found('tag')
-    tag.status = status_value
-    tag.battery_level = battery_level
-    tag.last_seen_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(tag)
-    return tag
 
 
 async def gateway_pull_sync(db: AsyncSession, gateway_id: int) -> list[GatewaySyncEvent]:

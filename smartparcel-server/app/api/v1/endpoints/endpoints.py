@@ -20,18 +20,12 @@ from app.schemas.schemas import (
     ParcelCreate,
     ParcelOut,
     ParcelStatusPatch,
-    ParcelTagBindingOut,
     PickupConfirmIn,
     PickupEventOut,
     StationCreate,
     StationOut,
     SyncPushItem,
     GatewaySyncEventOut,
-    TagBindIn,
-    TagCreate,
-    TagOut,
-    TagReleaseIn,
-    TagStatusReportIn,
     UserCreate,
     UserOut,
     UserPatch,
@@ -259,36 +253,6 @@ async def get_parcel(parcel_id: int, _: object = Depends(get_current_server_admi
 @router.patch('/parcels/{parcel_id}/status', response_model=ParcelOut)
 async def patch_parcel_status(parcel_id: int, payload: ParcelStatusPatch, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
     return await services.patch_parcel_status(db, parcel_id, payload.status)
-
-
-@router.post('/tags', response_model=TagOut)
-async def create_tag(payload: TagCreate, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
-    return await services.create_tag(db, payload.model_dump())
-
-
-@router.get('/tags', response_model=list[TagOut])
-async def list_tags(db: AsyncSession = Depends(get_db)):
-    return await services.list_tags(db)
-
-
-@router.get('/tags/{tag_id}', response_model=TagOut)
-async def get_tag(tag_id: int, db: AsyncSession = Depends(get_db)):
-    return await services.get_tag_by_pk(db, tag_id)
-
-
-@router.post('/tags/bind', response_model=ParcelTagBindingOut)
-async def bind_tag(payload: TagBindIn, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
-    return await services.bind_tag_to_parcel(db, payload.parcel_id, payload.tag_id, payload.station_id)
-
-
-@router.post('/tags/release', response_model=ParcelTagBindingOut)
-async def release_tag(payload: TagReleaseIn, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
-    return await services.release_binding(db, payload.pickup_binding_id)
-
-
-@router.post('/tags/status-report', response_model=TagOut)
-async def tag_status_report(payload: TagStatusReportIn, db: AsyncSession = Depends(get_db)):
-    return await services.report_tag_status(db, payload.tag_id, payload.status, payload.battery_level)
 
 
 @router.post('/pickup/confirm', response_model=PickupEventOut)

@@ -262,7 +262,7 @@ gateway 请求会自动附带：
 - `GET /api/v1/gateways/{gateway_id}/sync/pull`
 - `POST /api/v1/gateways/{gateway_id}/sync/push`
 - `POST /api/v1/gateways/{gateway_id}/events`
-- `POST /api/v1/tags/status-report`（兼容旧 mock，不作为实体智能寻物标签阶段常规事件）
+- `POST /api/v1/tags/status-report` 已删除；实体智能寻物标签阶段不使用 server 标签状态上报接口。
 - `POST /api/v1/pickup/confirm`（预留）
 
 ## 14. 迁移公网服务器时只需修改

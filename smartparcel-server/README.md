@@ -238,7 +238,28 @@ server 只保留两类标签相关业务信息：
 
 原则：标签日常状态不上云，标签异常才上报；标签控制不上云，取件结果才上报。
 
-### 10.6 数据库迁移
+### 10.6 已删除的 server 标签管理接口
+
+`/api/v1/tags*` 系列 server 标签管理接口已删除。server 不再提供标签创建、列表、查询、绑定、释放、状态上报 API，OpenAPI/Swagger 中也不再出现这些路由。
+
+已删除接口：
+
+- `POST /api/v1/tags`
+- `GET /api/v1/tags`
+- `GET /api/v1/tags/{tag_id}`
+- `POST /api/v1/tags/bind`
+- `POST /api/v1/tags/release`
+- `POST /api/v1/tags/status-report`
+
+server 仍只保留：
+
+- `TAG_EXCEPTION_REPORTED` 异常摘要通知。
+- `pickup_method = TAG_NFC_FAST` 取件审计。
+- `GatewaySyncEvent` 同步事件审计。
+
+`TAG_BOUND`、`TAG_RELEASED`、`TAG_STATUS_REPORT` 仅作为旧 mock 兼容同步事件被审计，不生成 server 标签状态。历史 `Tag` / `ParcelTagBinding` 模型和表暂时保留，避免不必要的删表迁移风险；实体智能寻物标签阶段不作为主数据使用。
+
+### 10.7 数据库迁移
 
 本阶段新增迁移：
 

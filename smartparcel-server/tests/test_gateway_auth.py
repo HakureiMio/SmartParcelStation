@@ -19,8 +19,8 @@ from app.core.security import generate_gateway_signature, raw_body_hash, validat
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.enums import GatewayRegistrationTokenStatus, UserRole  # noqa: E402
-from app.models.models import Gateway, GatewayRegistrationToken, Station, User  # noqa: E402
+from app.models.enums import GatewayRegistrationTokenStatus, ParcelOrigin, ParcelStatus, ParcelSyncStatus, UserRole  # noqa: E402
+from app.models.models import Gateway, GatewayRegistrationToken, GatewaySyncEvent, Notification, Parcel, PickupEvent, Station, Tag, User  # noqa: E402
 from app.services.services import hash_registration_token  # noqa: E402
 
 
@@ -79,9 +79,11 @@ async def reset_db():
     async with TestSessionLocal() as db:
         station = Station(id=1, station_code='STAUTH', name='Auth Test', address='Local', status='ACTIVE')
         admin = User(id=1, display_name='Admin', phone='18800000001', role=UserRole.SERVER_ADMIN, is_active=True)
+        staff = User(id=3, display_name='Staff', phone='18800000003', role=UserRole.STAFF, station_id=1, is_active=True)
         gateway = Gateway(gateway_code=GATEWAY_CODE, station_id=1, device_secret_hash=SECRET, status='ACTIVE')
         db.add(station)
         db.add(admin)
+        db.add(staff)
         db.add(gateway)
         await db.commit()
 
@@ -164,6 +166,131 @@ def test_core_gateway_routes_require_auth():
     assert client.post('/api/v1/gateways/heartbeat', json={'gateway_code': GATEWAY_CODE, 'status': 'ONLINE'}).status_code == 401
     assert client.get(f'/api/v1/gateways/{GATEWAY_CODE}/sync/pull').status_code == 401
     assert client.post(f'/api/v1/gateways/{GATEWAY_CODE}/events', json={'event_id': 'e1', 'event_type': 'PING', 'payload_json': {}}).status_code == 401
+
+
+def sync_push(items):
+    path = f'/api/v1/gateways/{GATEWAY_CODE}/sync/push'
+    headers, raw = signed_headers('POST', path, items)
+    return client.post(path, headers=headers, content=raw)
+
+
+def test_server_tag_management_routes_are_removed_from_openapi_and_return_404():
+    openapi = client.get('/api/v1/openapi.json')
+    if openapi.status_code == 404:
+        openapi = client.get('/openapi.json')
+    assert openapi.status_code == 200
+    paths = openapi.json()['paths']
+    removed_paths = [
+        '/api/v1/tags',
+        '/api/v1/tags/{tag_id}',
+        '/api/v1/tags/bind',
+        '/api/v1/tags/release',
+        '/api/v1/tags/status-report',
+    ]
+    for path in removed_paths:
+        assert path not in paths
+
+    assert client.post('/api/v1/tags', json={}).status_code == 404
+    assert client.get('/api/v1/tags').status_code == 404
+    assert client.get('/api/v1/tags/1').status_code == 404
+    assert client.post('/api/v1/tags/bind', json={}).status_code == 404
+    assert client.post('/api/v1/tags/release', json={}).status_code == 404
+    assert client.post('/api/v1/tags/status-report', json={}).status_code == 404
+
+
+def test_tag_exception_reported_sync_creates_staff_notification_without_tag_state():
+    item = {
+        'event_id': uuid.uuid4().hex,
+        'event_type': 'TAG_EXCEPTION_REPORTED',
+        'payload_json': {
+            'gateway_code': GATEWAY_CODE,
+            'station_id': 1,
+            'tag_ref': 'TAG001',
+            'exception_type': 'LOW_BATTERY',
+            'severity': 'WARNING',
+            'message': '智能寻物标签电量过低',
+            'occurred_at': '2026-06-03T10:00:00Z',
+        },
+    }
+    response = sync_push([item])
+    assert response.status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            notifications = (await db.execute(select(Notification))).scalars().all()
+            sync_events = (await db.execute(select(GatewaySyncEvent))).scalars().all()
+            tags = (await db.execute(select(Tag))).scalars().all()
+            assert len(notifications) == 1
+            assert 'LOW_BATTERY' in notifications[0].content
+            assert len(sync_events) == 1
+            assert sync_events[0].event_type == 'TAG_EXCEPTION_REPORTED'
+            assert tags == []
+
+    asyncio.run(check_db())
+
+
+def test_tag_nfc_fast_pickup_method_is_kept_in_pickup_audit_payload():
+    async def seed_parcel():
+        async with TestSessionLocal() as db:
+            db.add(
+                Parcel(
+                    parcel_code='P-TAG-NFC',
+                    pickup_code='123456',
+                    receiver_user_id=None,
+                    receiver_phone='18800000002',
+                    station_id=1,
+                    status=ParcelStatus.WAITING_PICKUP,
+                    origin=ParcelOrigin.GATEWAY_INBOUND,
+                    sync_status=ParcelSyncStatus.MERGED,
+                )
+            )
+            await db.commit()
+
+    asyncio.run(seed_parcel())
+
+    item = {
+        'event_id': uuid.uuid4().hex,
+        'event_type': 'OFFLINE_PICKUP',
+        'payload_json': {
+            'parcel_code': 'P-TAG-NFC',
+            'pickup_method': 'TAG_NFC_FAST',
+        },
+    }
+    response = sync_push([item])
+    assert response.status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            event = (await db.execute(select(PickupEvent))).scalar_one()
+            parcel = (await db.execute(select(Parcel).where(Parcel.parcel_code == 'P-TAG-NFC'))).scalar_one()
+            assert event.payload_json['pickup_method'] == 'TAG_NFC_FAST'
+            assert parcel.status == ParcelStatus.PICKED_UP
+
+    asyncio.run(check_db())
+
+
+def test_tag_status_report_sync_is_audit_only_and_does_not_create_tag():
+    item = {
+        'event_id': uuid.uuid4().hex,
+        'event_type': 'TAG_STATUS_REPORT',
+        'payload_json': {
+            'tag_id': 'TAG001',
+            'status': 'LOW_BATTERY',
+            'battery_level': 5,
+        },
+    }
+    response = sync_push([item])
+    assert response.status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            sync_event = (await db.execute(select(GatewaySyncEvent))).scalar_one()
+            tags = (await db.execute(select(Tag))).scalars().all()
+            assert sync_event.event_type == 'TAG_STATUS_REPORT'
+            assert sync_event.payload_json['status'] == 'LOW_BATTERY'
+            assert tags == []
+
+    asyncio.run(check_db())
 
 
 def admin_headers():

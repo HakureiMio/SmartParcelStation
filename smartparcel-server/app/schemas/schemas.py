@@ -11,11 +11,9 @@ from app.models.enums import (
     ParcelOrigin,
     ParcelStatus,
     ParcelSyncStatus,
-    ParcelTagBindingStatus,
     PickupEventType,
     SyncDirection,
     SyncStatus,
-    TagStatus,
     UserRole,
 )
 
@@ -200,50 +198,6 @@ class ParcelQueryOut(BaseModel):
     status: ParcelStatus
     origin: ParcelOrigin
     sync_status: ParcelSyncStatus
-
-
-class TagCreate(BaseModel):
-    tag_id: str
-    encrypted_token: str
-    station_id: int
-    status: TagStatus = TagStatus.IDLE
-
-
-class TagOut(ORMBase):
-    id: int
-    tag_id: str
-    encrypted_token: str
-    station_id: int
-    status: TagStatus
-    battery_level: int | None
-    last_seen_at: datetime | None
-
-
-class TagBindIn(BaseModel):
-    parcel_id: int
-    tag_id: str
-    station_id: int
-
-
-class TagReleaseIn(BaseModel):
-    pickup_binding_id: str
-
-
-class TagStatusReportIn(BaseModel):
-    tag_id: str
-    status: TagStatus
-    battery_level: int | None = None
-
-
-class ParcelTagBindingOut(ORMBase):
-    id: int
-    pickup_binding_id: str
-    parcel_id: int
-    tag_id: int
-    station_id: int
-    status: ParcelTagBindingStatus
-    created_at: datetime
-    updated_at: datetime
 
 
 class SyncPushItem(BaseModel):
