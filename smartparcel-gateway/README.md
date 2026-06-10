@@ -1,431 +1,334 @@
-﻿# SmartParcel Gateway
+# SmartParcel Gateway
 
-## 本地 BLE 标签 API
+## 1. 网关职责
 
-通过环境变量选择 BLE 后端：
+`smartparcel-gateway` 是站点本地网关项目，负责局域网内的本地业务、SQLite 缓存、标签主数据和 BLE 控制。它是智能寻物标签的本地主数据中心，不是中心账号系统。
 
-```env
-BLE_BACKEND=mock
-BLE_BACKEND=real
+gateway 当前负责：
+
+- 本地 SQLite 数据库。
+- 标签注册、标签本地编号和员工端显示名。
+- BLE 标签扫描、连接、唤醒、停止和状态读取。
+- 本地取件认证、mock NFC 和门禁读卡原型。
+- 与 `smartparcel-server` 的 `sync-push` / `sync-pull`。
+- HMAC 网关签名、heartbeat 和同步审计。
+
+## 2. 当前推荐闭环：员工小程序控制 BLE 标签
+
+当前推荐验证闭环是：
+
+```text
+smartparcel-miniprogram 员工端 BLE 标签管理
+  -> smartparcel-gateway local API
+  -> BLE_BACKEND=mock 或 BLE_BACKEND=real
+  -> nRF52810 标签 GATT Service
+  -> RGB LED / 蜂鸣器
 ```
 
-默认使用 `mock`，没有硬件也可以演示；切换为 `real` 后，gateway 使用 `bleak` 扫描并控制附近的真实标签。
+gateway 当前已提供 BLE 标签管理 local API，并支持 `BLE_BACKEND=mock/real`。
 
-启动 local API：
+- `mock` 后端用于无硬件演示。
+- `real` 后端通过 `bleak` 扫描和控制真实 BLE 标签。
+- 员工 BLE 标签管理接口已经支持 mock/real。
+- 门禁 `gate-access-card` 当前仍以原 mock BLE 流程为主，后续再迁移到 real BLE。
+
+## 3. 环境准备
 
 ```powershell
 cd smartparcel-gateway
+Remove-Item -Recurse -Force .\.venv -ErrorAction SilentlyContinue
+py -3.11 -m venv .venv
 .\.venv\Scripts\activate
-python -m gateway.main init-db
-python -m gateway.main local-api --host 0.0.0.0 --port 19000
-```
-
-主要接口：
-
-- `GET /local/health`
-- `POST /local/tags/scan`
-- `POST /local/tags/register-from-ble`
-- `GET /local/tags`
-- `GET /local/tags/{tag_id}`
-- `POST /local/tags/{tag_id}/connect`
-- `POST /local/tags/{tag_id}/wake`
-- `POST /local/tags/{tag_id}/stop`
-- `GET /local/tags/{tag_id}/status`
-
-注册时优先使用出厂 BLE 名称，例如 `SPS-F01-20260610-0001`；为第一阶段兼容，也接受旧测试名称 `SPS-TAG-0001`。注册成功后由 gateway 分配本地 `tag_id`，例如 `SPS-TAG-0001`，并生成员工端显示名，例如 `标签 001`。
-
-`smartparcel-gateway` 是 SmartParcelStation 的本地网关项目，运行在 Linux 或开发电脑，用于局域网阶段联调：
-- 本地 SQLite 离线数据存储
-- 通过 HTTP/HTTPS 与 `smartparcel-server` 同步
-- 通过 MQTT（EMQX）接收服务器命令与上报网关事件
-- 预留 PN532 NFC / BLE 智能寻物标签接口，当前提供 mock 实现
-
-## 1. 项目说明
-
-核心能力：
-- 本地数据库 7 张核心表（parcels/tags/bindings/nfc credentials/pickup events/tasks/sync queue）
-- 网关签名鉴权（HMAC-SHA256）
-- sync pull / sync push
-- heartbeat
-- MQTT 发布与订阅
-- mock NFC 刷卡触发 TAG_WAKE
-- 智能寻物标签 gateway-local-first 管理：标签完整状态只保存在本地 SQLite
-
-## 2. 局域网验证部署方式
-
-1. 安装 Python 3.11+
-2. 创建虚拟环境并安装依赖：
-
-```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-3. 复制 `.env.example` 为 `.env` 并修改局域网地址
-4. 初始化数据库
-5. 启动网关
-
-## 3. .env 配置说明
-
-- `GATEWAY_CODE`: 网关唯一编码
-- `GATEWAY_SECRET`: 网关签名密钥
-- `STATION_ID`: 所属站点
-- `SERVER_BASE_URL`: 服务器地址（局域网可用 `http://ip:port`）
-- `MQTT_HOST` / `MQTT_PORT`: EMQX 地址
-- `MQTT_USERNAME` / `MQTT_PASSWORD`: MQTT 凭证
-- `SQLITE_PATH`: SQLite 文件路径
-- `MOCK_NFC_ENABLED` / `MOCK_BLE_ENABLED`: mock 开关
-- `LOG_LEVEL`: 日志等级
-
-## 4. SQLite 初始化方式
-
-```bash
-python -m gateway.main init-db
-```
-
-## 5. 如何连接服务器
-
-```bash
-python -m gateway.main health
-python -m gateway.main heartbeat
-```
-
-网关请求会自动附带：
-- `X-Gateway-Code`
-- `X-Gateway-Timestamp`
-- `X-Gateway-Nonce`
-- `X-Gateway-Signature`
-
-签名串：`method + path + timestamp + nonce + body_hash`。
-
-### 5.1 使用短期注册凭证激活网关
-
-正式公网实验推荐使用“短期注册凭证 → 激活 → 长期密钥”的流程，不再把长期 `GATEWAY_SECRET` 手工同时填入 server 和 gateway。
-
-测试流程：
-
-1. 在 server 面板进入“网关管理”，创建网关短期注册凭证。
-2. 当前手机 App / 微信小程序 / 蓝牙或热点配置界面暂未实现，先用 CLI 模拟管理员把凭证写入网关。
-3. 在 gateway 执行：
-
-```bash
-python -m gateway.main bootstrap-activate \
-  --gateway-code GW001 \
-  --station-id 1 \
-  --registration-token ABCD-1234-EFGH-5678 \
-  --server-base-url http://127.0.0.1:18000
-```
-
-命令会调用 `/api/v1/gateways/bootstrap/activate`，成功后把以下配置写入 `.env`，并先备份原文件为 `.env.bak`：
-
-```env
-GATEWAY_CODE=GW001
-GATEWAY_SECRET=********
-STATION_ID=1
-SERVER_BASE_URL=http://127.0.0.1:18000
-```
-
-注意：
-
-- 控制台默认只显示脱敏后的长期密钥；如需手动复制，可加 `--no-write-env`，长期密钥只显示一次。
-- `.env` 不要提交到 Git。
-- 手动配置 `GATEWAY_CODE=GW001`、`GATEWAY_SECRET=gw-secret-demo` 仍可用于本地开发调试。
-- 正式公网实验推荐使用短期注册凭证激活流程，后续微信小程序或管理员 App 可替代当前 CLI。
-
-## 6. 如何连接 EMQX
-
-网关启动后自动连接并使用主题：
-- 发布 `gateway/{gateway_code}/status`
-- 发布 `gateway/{gateway_code}/events`
-- 订阅 `server/{gateway_code}/commands`
-
-## 7. 如何运行 gateway
-
-```bash
-python -m gateway.main run
-```
-
-启动动作：
-- 初始化 DB
-- 健康检查
-- MQTT 连接
-- heartbeat / sync pull / sync push 定时循环
-
-## 8. 如何使用 mock-nfc 测试门禁刷卡
-
-```bash
-python -m gateway.main mock-nfc CARD_UID
-```
-
-流程：
-- 查 `local_nfc_credentials`
-- 查用户待取件包裹
-- 查绑定标签
-- 创建 TAG_WAKE 任务并调用 mock BLE
-- 写入 pickup event + sync queue
-
-## 9. 如何执行 sync-pull 和 sync-push
-
-```bash
-python -m gateway.main sync-pull
-python -m gateway.main sync-push
-```
-
-## 10. 阶段 A：gateway 侧 mock 闭环流程
-
-当前阶段条形码扫描用工作人员手动输入代替；自助扫码取件暂不实现，只做人工确认取件和 `TAG_NFC_FAST` 结构预留。智能寻物标签真实管理在 gateway，server 只接收标签异常摘要和取件审计。
-
-### 10.1 初始化 gateway
+检查不要混入 nRF 依赖：
 
 ```powershell
-cd smartparcel-gateway
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip show west
+python -m pip show pyelftools
+```
+
+预期：
+
+```text
+WARNING: Package(s) not found: west
+WARNING: Package(s) not found: pyelftools
+```
+
+`smartparcel-gateway/.venv` 只用于 gateway Python 项目，不用于编译 `clip-node-nrf52810`。
+
+## 4. .env 配置
+
+复制配置：
+
+```powershell
 copy .env.example .env
 ```
 
-`.env` 示例：
+关键配置项：
 
 ```env
 GATEWAY_CODE=GW001
 GATEWAY_SECRET=gw-secret-demo
 STATION_ID=1
 SERVER_BASE_URL=http://127.0.0.1:18000
+SQLITE_PATH=./data/gateway.db
+BLE_BACKEND=mock
 ```
 
-执行：
+`BLE_BACKEND` 可选：
+
+```env
+BLE_BACKEND=mock
+BLE_BACKEND=real
+```
+
+## 5. 启动 local API
 
 ```powershell
 python -m gateway.main init-db
-python -m gateway.main health
-python -m gateway.main heartbeat
-```
-
-### 10.2 模拟快递实到入站
-
-```powershell
-python -m gateway.main inbound-parcel --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --receiver-user-id 2 --receiver-name-masked "张*"
-python -m gateway.main sync-push
-```
-
-该命令会写入本地 `local_parcels`，并加入 `sync_queue`。上传事件类型为 `GATEWAY_INBOUND`。server 收到后会按 `parcel_code` 匹配预录入包裹，匹配成功则更新为待取件，匹配失败则新建来源为 `GATEWAY_INBOUND` 的中心包裹。
-
-### 10.3 模拟本地标签注册与绑定
-
-```powershell
-python -m gateway.main register-tag --tag-id TAG001 --hw-model E73-2G4M04S1A
-python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
-```
-
-`register-tag` 写入或更新本地 `local_tags`；`bind-tag` 写入本地 `local_parcel_tag_bindings`，默认不上传 server。开发测试如需兼容旧审计，可显式增加 `bind-tag --upload-audit`；实体智能寻物标签阶段不依赖 server 查询标签状态。
-
-### 10.4 模拟人工确认取件
-
-```powershell
-python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --pickup-method OFFLINE_MANUAL
-python -m gateway.main sync-push
-```
-
-gateway 本地核对快递号、手机号或取件码，成功后生成 pickup event。server 收到 `OFFLINE_PICKUP` / `PICKUP_CONFIRMED` 类事件后更新包裹为 `PICKED_UP`。
-
-### 10.5 保留 mock NFC / 寻物流程
-
-```powershell
-python -m gateway.main mock-nfc CARD_UID
-python -m gateway.main sync-push
-```
-
-现有流程继续保留：gateway 本地认证通过后创建 `TAG_WAKE` task，并调用 mock BLE 执行亮灯/蜂鸣。
-
-## 11. 智能寻物标签本地管理流程
-
-智能寻物标签采用 `gateway-local-first` 管理模式：`local_tags` 是标签完整状态的唯一主数据表，`local_parcel_tag_bindings` 是标签与包裹绑定关系的本地主数据表。标签日常状态不上云，标签异常才上报；标签控制不上云，取件结果才上报。
-
-- `register-tag`：本地注册智能寻物标签，写入/更新 `local_tags`，不上传 server。
-- `bind-tag`：默认要求标签已注册，只更新 `local_parcel_tag_bindings` 和 `local_tags`；`--auto-register` 仅用于开发测试。
-- `mock-nfc` / `TAG_WAKE` / `TAG_STOP`：寻物亮灯、蜂鸣、停止提醒和状态查询都在 gateway 本地执行；未来 mock BLE 替换为真实 BLE 后 server 职责不变。
-- `release-tag`：取件后或人工释放标签，只更新本地绑定和标签状态；释放动作本身默认不上传 server。
-- `report-tag-exception`：把 `TAG_EXCEPTION_REPORTED` 写入 `sync_queue`，payload 只包含 `tag_ref`、异常类型、严重级别、消息和发生时间，不包含完整标签状态。
-- `confirm-pickup --pickup-method TAG_NFC_FAST`：用于高级用户通过智能寻物标签 NFC 快速取件；上传取件审计时保留 `pickup_method = TAG_NFC_FAST`。
-
-本地保留但不作为 server 常规同步事件的内容包括：标签注册、标签 UID、硬件型号、固件版本、BLE 地址、在线/离线、电量、最后心跳、当前状态、绑定/释放关系、`TAG_WAKE`、`TAG_STOP`、`TAG_STATUS_QUERY`、`TAG_BATTERY_UPDATED`。`sync-push` 不上传完整标签状态；只上传标签异常摘要和取件完成审计。
-
-示例：
-
-```powershell
-python -m gateway.main register-tag --tag-id TAG001 --hw-model E73-2G4M04S1A
-python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
-python -m gateway.main report-tag-exception --tag-id TAG001 --exception-type LOW_BATTERY --severity WARNING --message "智能寻物标签电量过低"
-python -m gateway.main confirm-pickup --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --pickup-method TAG_NFC_FAST
-python -m gateway.main sync-push
-```
-
-## 12. 门禁本地 API 与小屏显示流程
-
-门禁读卡器/门禁控制器作为 gateway 本地子终端，默认通过局域网直连 gateway，不访问公网 server。gateway 本地完成用户认证、放行裁决、标签唤醒和小屏显示内容生成；弱网或 server 临时不可用时，门禁放行和寻物仍可继续。
-
-核心规则：
-
-- 颜色不是包裹唯一编号；颜色是本次取件会话的视觉辅助。
-- 货架号是空间定位依据。
-- NFC/标签绑定关系是最终确认依据。
-- 同一用户多个包裹只分配一个 `session_color`，所有标签同色闪烁，用 `shelf_code` 显示多个位置。
-- 有待取包裹但缺少标签绑定时，当前策略是允许放行，返回 `warnings=["NO_ACTIVE_TAG_BINDING"]`，小屏显示货架号并提示人工确认。
-
-### 12.1 CLI 测试
-
-```powershell
-python -m gateway.main register-nfc-credential --credential-type CARD_UID --credential-value CARD_UID_001 --user-id 2
-python -m gateway.main inbound-parcel --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --receiver-user-id 2 --receiver-name-masked "张*" --shelf-code A03
-python -m gateway.main register-tag --tag-id TAG001
-python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
-python -m gateway.main gate-access --reader-id GATE01 --credential-type CARD_UID --credential-value CARD_UID_001
-```
-
-返回字段包括：
-
-- `access`：`GRANTED` 或 `DENIED`
-- `pickup_session_id`：本次取件会话 ID
-- `pickup_count`：待取包裹数量
-- `session_color` / `color_display_name`：本次会话统一颜色
-- `shelves`：货架号列表
-- `display_text`：门禁小屏显示文本
-- `items`：包裹、货架、标签和唤醒结果
-- `warnings`：缺少标签绑定、唤醒失败等提示
-
-### 12.2 本地 HTTP API
-
-启动：
-
-```powershell
 python -m gateway.main local-api --host 0.0.0.0 --port 19000
 ```
 
 健康检查：
 
-```http
-GET /local/health
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/health"
 ```
 
-门禁读卡：
+## 6. BLE_BACKEND=mock/real
 
-```http
-POST /local/gate/access-card
+`BLE_BACKEND=mock`：
+
+- 不需要硬件。
+- 扫描会返回固定测试标签 `SPS-F01-20260610-0001`。
+- 适合小程序页面演示和 API 闭环测试。
+
+`BLE_BACKEND=real`：
+
+- 需要 gateway 设备具备蓝牙适配器。
+- 需要系统允许 Python/`bleak` 扫描和连接 BLE 设备。
+- 真实标签不能被其他设备持续占用连接。
+
+## 7. BLE 标签管理 API
+
+主要接口：
+
+```text
+GET  /local/health
+POST /local/tags/scan
+POST /local/tags/register-from-ble
+GET  /local/tags
+GET  /local/tags/{tag_id}
+POST /local/tags/{tag_id}/connect
+POST /local/tags/{tag_id}/wake
+POST /local/tags/{tag_id}/stop
+GET  /local/tags/{tag_id}/status
 ```
 
-请求：
+`POST /local/tags/scan` 请求示例：
 
 ```json
 {
-  "reader_id": "GATE01",
-  "credential_type": "CARD_UID",
-  "credential_value": "04A1B2C3D4"
+  "timeout_sec": 5
 }
 ```
 
-示例响应：
+`POST /local/tags/register-from-ble` 请求示例：
 
 ```json
 {
-  "access": "GRANTED",
-  "reader_id": "GATE01",
-  "user_id": "2",
-  "pickup_session_id": "sess_xxx",
-  "pickup_count": 3,
-  "session_color": "BLUE",
-  "color_display_name": "蓝色",
-  "blink_pattern": "SLOW",
-  "shelves": ["A03", "B12", "C07"],
-  "display_text": "待取3件｜蓝色闪烁｜A03 B12 C07",
-  "items": [
-    {
-      "parcel_code": "P20260602001",
-      "shelf_code": "A03",
-      "tag_id": "TAG001",
-      "wake_result": "OK"
-    }
-  ],
-  "warnings": []
+  "ble_name": "SPS-F01-20260610-0001",
+  "ble_address": "MOCK:TAG:FACTORY:0001"
 }
 ```
 
-同步事件说明：
+`POST /local/tags/{tag_id}/wake` 请求示例：
 
-- `NFC_ACCESS_GRANTED`：门禁放行审计。
-- `NFC_ACCESS_DENIED`：门禁拒绝审计。
-- `TAG_WAKE_STARTED`：标签唤醒任务启动审计。
-
-这些事件进入 `sync_queue` 后由 `sync-push` 异步上传 server。payload 不包含完整标签状态、电池、BLE 地址、固件版本等本地主数据。
-
-## 13. 公网 HTTPS 与 HMAC 签名
-
-公网实验时推荐把 `SERVER_BASE_URL` 改为 HTTPS 域名，例如：
-
-```env
-SERVER_BASE_URL=https://sps.example.com
-GATEWAY_CODE=GW001
-GATEWAY_SECRET=change-me-generate-random
+```json
+{
+  "color": "BLUE",
+  "duration_sec": 30
+}
 ```
 
-每台 gateway 必须使用独立强随机 `GATEWAY_SECRET`。生成示例：
+## 8. 标签命名与本地编号规则
+
+真实标签推荐使用出厂 BLE 名称：
+
+```text
+SPS-F01-20260610-0001
+```
+
+格式：
+
+```text
+SPS-{factory_code}-{production_date}-{serial_no}
+```
+
+注册到 gateway 后，gateway 分配本地编号：
+
+```text
+tag_id = SPS-TAG-0001
+display_name = 标签 001
+tag_uid = SPS-F01-20260610-0001
+```
+
+员工端列表优先展示 `display_name`，详情页展示 `tag_id`、`tag_uid`、`ble_name`、`ble_address`、状态、电池和最近连接时间。
+
+## 9. 与 server 同步
+
+gateway 与 server 的关系：
+
+- gateway 通过 `heartbeat` 上报在线状态。
+- gateway 通过 `sync-push` 上传入站、取件、门禁审计和标签异常摘要。
+- gateway 通过 `sync-pull` 拉取 server 侧任务。
+- server 不直接控制 BLE 标签。
+- server 不保存完整标签实时状态。
+
+常用命令：
 
 ```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+python -m gateway.main health
+python -m gateway.main heartbeat
+python -m gateway.main sync-push
+python -m gateway.main sync-pull
 ```
 
-gateway 请求会自动附带：
+## 10. mock NFC / 门禁流程当前状态
 
-- `X-Gateway-Code`
-- `X-Gateway-Timestamp`
-- `X-Gateway-Nonce`
-- `X-Gateway-Body-SHA256`
-- `X-Gateway-Signature`
+`mock-nfc` 和 `gate-access-card` 是历史阶段 A 的本地门禁验证流程。当前仍可用于演示本地认证、取件会话、`TAG_WAKE` task 和同步审计。
 
-签名原文为 `METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + NONCE + "\n" + BODY_SHA256`。JSON body 使用稳定序列化；GET 请求 body 为空。ARM 网关需要保持时间同步，建议启用 NTP / `systemd-timesyncd`。
+需要注意：
 
-普通 HTTPS 用来验证服务器证书并加密传输；HMAC 用来证明 gateway 身份并保证消息完整性。mTLS 后续可选，本阶段不强制。
+- 员工 BLE 标签管理接口已经支持 mock/real。
+- 门禁 `gate-access-card` 当前仍以旧 mock BLE 流程为主。
+- 不要把门禁刷卡流程理解为已经完全迁移到真实 BLE。
 
-## 14. 与 smartparcel-server 接口约定
+历史 mock NFC / 阶段 A 流程见 `docs/legacy_stage_a_mock_flow.md`。门禁读卡流程设计见 `docs/gateway_gate_access_flow.md`。
 
-已封装：
-- `GET /api/v1/health`
-- `POST /api/v1/gateways/heartbeat`
-- `GET /api/v1/gateways/{gateway_id}/sync/pull`
-- `POST /api/v1/gateways/{gateway_id}/sync/push`
-- `POST /api/v1/gateways/{gateway_id}/events`
-- `POST /api/v1/tags/status-report` 已删除；实体智能寻物标签阶段不使用 server 标签状态上报接口。
-- `POST /api/v1/pickup/confirm`（预留）
+## 11. 测试流程
 
-## 15. 迁移公网服务器时只需修改
+### 11.1 初始化数据库并启动 local API
 
-- `SERVER_BASE_URL` 改为 `https://...`
-- `MQTT_HOST` / `MQTT_PORT` 指向公网 Broker
-- 如启用 TLS，再扩展 MQTT TLS 配置（当前结构已预留可扩展）
-
-## CLI 命令清单
-
-- `python -m gateway.main init-db`
-- `python -m gateway.main health`
-- `python -m gateway.main sync-pull`
-- `python -m gateway.main sync-push`
-- `python -m gateway.main heartbeat`
-- `python -m gateway.main inbound-parcel`
-- `python -m gateway.main register-nfc-credential`
-- `python -m gateway.main register-tag`
-- `python -m gateway.main bind-tag`
-- `python -m gateway.main release-tag`
-- `python -m gateway.main report-tag-exception`
-- `python -m gateway.main gate-access`
-- `python -m gateway.main local-api`
-- `python -m gateway.main confirm-pickup`
-- `python -m gateway.main run`
-- `python -m gateway.main mock-nfc CARD_UID`
-- `python -m gateway.main list-parcels`
-- `python -m gateway.main list-tags`
-- `python -m gateway.main list-tasks`
-
-## 测试
-
-```bash
-pytest -q tests
+```powershell
+copy .env.example .env
+python -m gateway.main init-db
+python -m gateway.main local-api --host 0.0.0.0 --port 19000
 ```
+
+### 11.2 mock BLE 标签扫描
+
+`.env` 设置：
+
+```env
+BLE_BACKEND=mock
+```
+
+重启 local API 后执行：
+
+```powershell
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://127.0.0.1:19000/local/tags/scan" `
+  -ContentType "application/json" `
+  -Body '{"timeout_sec":5}'
+```
+
+预期返回包含：
+
+```text
+SPS-F01-20260610-0001
+```
+
+### 11.3 注册标签
+
+```powershell
+$body = @{
+  ble_name = "SPS-F01-20260610-0001"
+  ble_address = "MOCK:TAG:FACTORY:0001"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://127.0.0.1:19000/local/tags/register-from-ble" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+预期：
+
+```text
+tag_id = SPS-TAG-0001
+display_name = 标签 001
+tag_uid = SPS-F01-20260610-0001
+```
+
+### 11.4 查看标签列表和详情
+
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags"
+Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001"
+```
+
+### 11.5 connect、wake、stop、status
+
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/connect"
+
+$wakeBody = @{
+  color = "BLUE"
+  duration_sec = 30
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/wake" `
+  -ContentType "application/json" `
+  -Body $wakeBody
+
+Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/stop"
+Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/status"
+```
+
+### 11.6 真实 BLE 测试
+
+`.env` 设置：
+
+```env
+BLE_BACKEND=real
+```
+
+重启 local API 后执行：
+
+```powershell
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://127.0.0.1:19000/local/tags/scan" `
+  -ContentType "application/json" `
+  -Body '{"timeout_sec":5}'
+```
+
+预期扫描到真实标签：
+
+```text
+SPS-F01-20260610-0001
+```
+
+## 12. 常见问题
+
+扫描不到真实标签时，优先检查：
+
+```text
+1. 标签是否已上电。
+2. 固件是否已烧录。
+3. BLE 名称是否为 SPS-F01-20260610-0001。
+4. gateway 设备是否有蓝牙适配器。
+5. Windows/Linux 蓝牙权限是否可用。
+6. BLE_BACKEND 是否已经改为 real 并重启 local API。
+7. 标签是否已经被其他设备连接占用。
+```
+
+如果小程序真机访问失败，检查 `gatewayBaseUrl` 是否为 gateway 局域网 IP，而不是 `127.0.0.1`。
