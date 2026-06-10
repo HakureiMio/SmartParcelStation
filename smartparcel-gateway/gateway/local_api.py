@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy import select
 
 from gateway.core.config import get_settings
+from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
 from gateway.models.entities import LocalTag
 from gateway.models.entities import TagStatus
@@ -25,6 +26,11 @@ from gateway.services.task_service import TaskService
 app = FastAPI(title="SmartParcel Gateway Local API")
 FACTORY_BLE_NAME_RE = re.compile(r"^SPS-[A-Z0-9]{2,8}-[0-9]{8}-[0-9]{4,8}$")
 LEGACY_BLE_NAME_RE = re.compile(r"^SPS-TAG-[0-9A-Fa-f]{4,8}$")
+
+
+@app.on_event("startup")
+def ensure_local_database_schema() -> None:
+    init_db()
 
 
 class GateAccessIn(BaseModel):

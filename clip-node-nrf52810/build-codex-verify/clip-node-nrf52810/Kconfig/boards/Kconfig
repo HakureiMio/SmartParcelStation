@@ -1,2 +1,0 @@
-# Load Zephyr board Kconfig descriptions.
-osource "D:/Project/SmartParcelStation/clip-node-nrf52810/boards/nordic/clip_node_nrf52810/Kconfig"
