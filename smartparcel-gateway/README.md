@@ -1,5 +1,39 @@
 ﻿# SmartParcel Gateway
 
+## 本地 BLE 标签 API
+
+通过环境变量选择 BLE 后端：
+
+```env
+BLE_BACKEND=mock
+BLE_BACKEND=real
+```
+
+默认使用 `mock`，没有硬件也可以演示；切换为 `real` 后，gateway 使用 `bleak` 扫描并控制附近的真实标签。
+
+启动 local API：
+
+```powershell
+cd smartparcel-gateway
+.\.venv\Scripts\activate
+python -m gateway.main init-db
+python -m gateway.main local-api --host 0.0.0.0 --port 19000
+```
+
+主要接口：
+
+- `GET /local/health`
+- `POST /local/tags/scan`
+- `POST /local/tags/register-from-ble`
+- `GET /local/tags`
+- `GET /local/tags/{tag_id}`
+- `POST /local/tags/{tag_id}/connect`
+- `POST /local/tags/{tag_id}/wake`
+- `POST /local/tags/{tag_id}/stop`
+- `GET /local/tags/{tag_id}/status`
+
+注册时优先使用出厂 BLE 名称，例如 `SPS-F01-20260610-0001`；为第一阶段兼容，也接受旧测试名称 `SPS-TAG-0001`。注册成功后由 gateway 分配本地 `tag_id`，例如 `SPS-TAG-0001`，并生成员工端显示名，例如 `标签 001`。
+
 `smartparcel-gateway` 是 SmartParcelStation 的本地网关项目，运行在 Linux 或开发电脑，用于局域网阶段联调：
 - 本地 SQLite 离线数据存储
 - 通过 HTTP/HTTPS 与 `smartparcel-server` 同步

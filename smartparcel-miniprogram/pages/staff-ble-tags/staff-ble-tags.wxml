@@ -1,0 +1,60 @@
+<view class="page safe ble-page">
+  <view class="title">BLE 标签管理</view>
+  <view class="subtitle">通过局域网网关扫描、注册并控制附近标签</view>
+
+  <view class="glass-card status-card">
+    <view class="row"><text class="label">网关状态</text><text class="value">{{gatewayState}}</text></view>
+    <view class="row"><text class="label">数据来源</text><text class="value">{{gatewaySource}}</text></view>
+  </view>
+
+  <view class="section-title">附近标签</view>
+  <button class="glass-button primary-button" loading="{{scanning}}" bindtap="scan">扫描附近标签</button>
+  <view class="empty" wx:if="{{scanItems.length === 0}}">暂无扫描结果</view>
+  <view class="tag-card" wx:for="{{scanItems}}" wx:key="ble_address">
+    <view class="tag-top">
+      <view>
+        <view class="tag-name">{{item.ble_name}}</view>
+        <view class="tag-meta">{{item.ble_address}}</view>
+      </view>
+      <text class="status-pill {{item.registered ? 'ok' : ''}}">{{item.registered ? '已注册' : '未注册'}}</text>
+    </view>
+    <view class="tag-meta">RSSI {{item.rssi || '-'}}</view>
+    <button class="glass-button secondary-button compact" data-index="{{index}}" bindtap="register" disabled="{{item.registered || loading}}">
+      注册到网关
+    </button>
+  </view>
+
+  <view class="section-title local-title">已注册标签</view>
+  <view class="empty" wx:if="{{tags.length === 0}}">还没有注册标签</view>
+  <view class="tag-card local" wx:for="{{tags}}" wx:key="tag_id" data-id="{{item.tag_id}}" bindtap="selectTag">
+    <view class="tag-top">
+      <view>
+        <view class="tag-name">{{item.display_name || item.tag_id}}</view>
+        <view class="tag-meta">{{item.tag_id}}</view>
+      </view>
+      <text class="status-pill ok">{{item.status}}</text>
+    </view>
+    <view class="tag-meta">电池 {{item.battery_mv || '-'}} mV · {{item.ble_name || '-'}}</view>
+  </view>
+
+  <view class="glass-card detail" wx:if="{{detailOpen && selectedTag}}">
+    <view class="section-title">标签详情</view>
+    <view class="row"><text class="label">网关编号</text><text class="value">{{selectedTag.display_name}}</text></view>
+    <view class="row"><text class="label">本地编码</text><text class="value">{{selectedTag.tag_id}}</text></view>
+    <view class="row"><text class="label">出厂名称</text><text class="value">{{selectedTag.tag_uid || selectedTag.ble_name}}</text></view>
+    <view class="row"><text class="label">BLE 地址</text><text class="value">{{selectedTag.ble_address}}</text></view>
+    <view class="row"><text class="label">状态</text><text class="value">{{selectedTag.status}}</text></view>
+    <view class="row"><text class="label">电池电压</text><text class="value">{{selectedTag.battery_mv || '-'}} mV</text></view>
+    <view class="row"><text class="label">最后发现</text><text class="value">{{selectedTag.last_seen_at || '-'}}</text></view>
+    <view class="row"><text class="label">最后连接</text><text class="value">{{selectedTag.last_connected_at || '-'}}</text></view>
+    <view class="grid controls">
+      <button class="glass-button secondary-button" bindtap="connect" disabled="{{loading}}">连接</button>
+      <button class="glass-button primary-button" bindtap="wake" disabled="{{loading}}">蓝色亮灯/蜂鸣</button>
+      <button class="glass-button warn-button" bindtap="stop" disabled="{{loading}}">停止</button>
+      <button class="glass-button secondary-button" bindtap="readStatus" disabled="{{loading}}">读取状态</button>
+    </view>
+  </view>
+
+  <view class="debug-toggle" bindtap="toggleDebug">调试信息 {{debugOpen ? '收起' : '展开'}}</view>
+  <view class="debug-box" wx:if="{{debugOpen}}">{{debugText}}</view>
+</view>

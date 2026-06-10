@@ -46,6 +46,79 @@
 - `SWDIO` / `SWDCLK` 保留为调试接口，不作为普通 GPIO 使用。
 - 纽扣电池供电场景下，调试时建议外部稳定电源，避免电压跌落。
 
+### 3.1 nRF52810 模组：使用 ST-LINK + OpenOCD 进行连接验证、编译与烧录
+
+本项目中的 nRF52810 标签节点可以使用 **ST-LINK 通过 SWD 接口**连接，不要求只能使用 Nordic 官方 DK 或 J-Link。Windows 终端下推荐使用 xPack OpenOCD 进行连接验证、擦除和烧录。
+
+硬件连接：
+
+- `ST-LINK SWDIO` -> `nRF52810 SWDIO`
+- `ST-LINK SWCLK` -> `nRF52810 SWCLK`
+- `ST-LINK GND` -> `nRF52810 GND`
+- nRF52810 需要稳定 3.3V 供电。
+- 如果使用外部 3.3V 供电，必须与 ST-LINK 共地。
+- 不建议直接给裸模块上 5V。
+
+安装 xPack OpenOCD：
+
+```powershell
+winget install xpack-dev-tools.openocd-xpack
+```
+
+安装后验证：
+
+```powershell
+openocd --version
+```
+
+ST-LINK 连接验证：
+
+```powershell
+openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; targets; shutdown"
+```
+
+该命令只用于验证 ST-LINK 是否能够通过 SWD 正确识别 nRF52810，不会烧录程序。连接成功时，终端通常会出现类似 STLINK 版本、Target voltage、Cortex-M4 detected、nRF52810-QFAA 等信息。
+
+擦除：
+
+```powershell
+openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; nrf52 mass_erase; shutdown"
+```
+
+烧录 `build/merged.hex`：
+
+```powershell
+openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; program build/merged.hex verify reset; shutdown"
+```
+
+如果使用 Zephyr / nRF Connect SDK 默认产物路径，则烧录 `build/zephyr/merged.hex`：
+
+```powershell
+openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; program build/zephyr/merged.hex verify reset; shutdown"
+```
+
+如果使用 nRF Connect SDK / Zephyr / west，可先编译生成 hex 文件：
+
+```powershell
+west build -b nrf52dk_nrf52810 . -p always
+```
+
+本工程已有自定义 board 配置时，也可以继续使用前文的 `clip_node_nrf52810` 目标。常见产物位置：
+
+```text
+build/zephyr/merged.hex
+```
+
+如果实际工程使用自定义 Makefile、CMake 或其他构建系统，则按实际工程编译生成 hex 文件，再替换上方 OpenOCD `program` 命令中的 hex 路径。
+
+常见问题：
+
+- 如果 OpenOCD 提示找不到 `interface/stlink.cfg` 或 `target/nrf52.cfg`，说明 OpenOCD scripts 路径没有被正确识别，需要检查 xPack OpenOCD 安装路径或环境变量。
+- 如果提示无法连接 target，优先检查 `SWDIO` / `SWCLK` 是否接反、`GND` 是否共地、模块是否有 3.3V 供电。
+- 如果 Target voltage 异常或为 0，说明 ST-LINK 没有检测到目标板电压。
+- 如果烧录失败，可以先执行 mass erase 再重新烧录。
+- 如果连接不稳定，可以把 `adapter speed` 从 `1000` 降到 `500` 或 `100`。
+
 ## 4. Build 方法
 
 ### 方式 A：VS Code 图形化

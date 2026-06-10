@@ -1,5 +1,48 @@
 # SmartParcelStation
 
+## 第一阶段 BLE 硬件闭环
+
+当前仓库已加入第一阶段本地硬件控制闭环：
+
+```text
+smartparcel-miniprogram 员工端 BLE 标签管理页
+  -> smartparcel-gateway local API
+  -> BLE_BACKEND mock/real 服务
+  -> nRF52810 标签 GATT Service
+  -> RGB LED / buzzer
+```
+
+启动 gateway：
+
+```powershell
+cd smartparcel-gateway
+.\.venv\Scripts\activate
+python -m gateway.main init-db
+python -m gateway.main local-api --host 0.0.0.0 --port 19000
+```
+
+mock 测试：
+
+```env
+BLE_BACKEND=mock
+```
+
+小程序操作：员工端 -> BLE 标签管理 -> 扫描 -> 注册 -> 连接 -> 亮灯/蜂鸣 -> 停止。
+
+真实 BLE 测试：
+
+```env
+BLE_BACKEND=real
+```
+
+真机调试时，把小程序里的 gateway 地址改为网关所在电脑/设备的局域网 IP：
+
+```js
+gatewayBaseUrl: 'http://网关局域网IP:19000'
+```
+
+真机上 `127.0.0.1` 指向手机本机，不是电脑或网关；员工手机和 gateway 必须在同一局域网。完整流程见 `docs/tag_ble_gateway_flow.md`。
+
 SmartParcelStation（SPS）是一个面向小型快递站的智能包裹管理与辅助取件系统。当前处于局域网验证和毕业设计验证阶段，重点验证 `server + gateway + mock NFC/BLE` 的软件闭环，不追求生产级完整认证。
 
 ## 项目结构

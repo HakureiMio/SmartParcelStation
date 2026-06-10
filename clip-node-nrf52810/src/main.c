@@ -199,6 +199,7 @@ static void handle_command_frame(const uint8_t *data, uint8_t len)
 int main(void)
 {
     LOG_INF("clip node boot: EWT73-2G4M04S1A / E73-2G4M04S1A");
+    LOG_INF("BLE name: %s", CONFIG_BT_DEVICE_NAME);
 
     k_work_init_delayable(&alert_timeout_work, alert_timeout_handler);
 

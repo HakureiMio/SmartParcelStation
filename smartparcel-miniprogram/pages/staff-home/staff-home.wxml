@@ -1,1 +1,31 @@
-<view class="page safe staff-page"><view class="title">员工工作台</view><view class="subtitle">入库、标签绑定与异常处理</view><view class="glass-card status-card"><view class="row"><text class="label">当前员工</text><text class="value">{{displayName}}</text></view><view class="row"><text class="label">网关状态</text><text class="value">{{gateway}}</text></view></view><view class="action-grid"><view class="work-card primary" data-page="staff-inbound-bind" bindtap="go"><view class="work-title">入库并绑定标签</view><view class="work-sub">录入包裹 · 读取 NFC · 确认绑定</view></view><view class="work-card" data-page="staff-tag-nfc" bindtap="go"><view class="work-title">NFC 标签读写</view><view class="work-sub">读取或写入智能标签</view></view><view class="work-card" data-page="staff-exception" bindtap="go"><view class="work-title">异常处理</view><view class="work-sub">记录标签和现场异常</view></view><view class="work-card" data-page="gateway-status" bindtap="go"><view class="work-title">网关状态</view><view class="work-sub">检查服务器与本地网关</view></view></view><button class="glass-button secondary-button logout" bindtap="logout">退出登录</button></view>
+<view class="page safe staff-page">
+  <view class="title">员工工作台</view>
+  <view class="subtitle">入库、标签控制与现场处理</view>
+  <view class="glass-card status-card">
+    <view class="row"><text class="label">当前员工</text><text class="value">{{displayName}}</text></view>
+    <view class="row"><text class="label">网关状态</text><text class="value">{{gateway}}</text></view>
+  </view>
+  <view class="action-grid">
+    <view class="work-card primary" data-page="staff-ble-tags" bindtap="go">
+      <view class="work-title">BLE 标签管理</view>
+      <view class="work-sub">扫描、注册、连接、亮灯蜂鸣</view>
+    </view>
+    <view class="work-card" data-page="staff-inbound-bind" bindtap="go">
+      <view class="work-title">入库并绑定标签</view>
+      <view class="work-sub">录入包裹，读取 NFC，确认绑定</view>
+    </view>
+    <view class="work-card" data-page="staff-tag-nfc" bindtap="go">
+      <view class="work-title">NFC 标签读写</view>
+      <view class="work-sub">读取或写入智能标签</view>
+    </view>
+    <view class="work-card" data-page="staff-exception" bindtap="go">
+      <view class="work-title">异常处理</view>
+      <view class="work-sub">记录标签和现场异常</view>
+    </view>
+    <view class="work-card" data-page="gateway-status" bindtap="go">
+      <view class="work-title">网关状态</view>
+      <view class="work-sub">检查服务器与本地网关</view>
+    </view>
+  </view>
+  <button class="glass-button secondary-button logout" bindtap="logout">退出登录</button>
+</view>

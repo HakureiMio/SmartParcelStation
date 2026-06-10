@@ -1,0 +1,32 @@
+.ble-page { padding-bottom: 64rpx; }
+.local-title { margin-top: 34rpx; }
+.tag-card {
+  background: rgba(255,255,255,.9);
+  border: 1rpx solid rgba(226,232,240,.8);
+  border-radius: 28rpx;
+  padding: 26rpx;
+  margin: 18rpx 0;
+  box-shadow: 0 14rpx 36rpx rgba(15,23,42,.06);
+}
+.tag-card.local { padding-bottom: 28rpx; }
+.tag-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20rpx; }
+.tag-name { font-size: 30rpx; font-weight: 780; color: #0f172a; line-height: 1.35; word-break: break-all; }
+.tag-meta { margin-top: 10rpx; color: #64748b; font-size: 23rpx; line-height: 1.45; word-break: break-all; }
+.status-pill { flex: 0 0 auto; background: #f1f5f9; color: #475569; }
+.status-pill.ok { background: #dcfce7; color: #166534; }
+.compact { height: 78rpx; min-height: 78rpx; margin-top: 22rpx; font-size: 25rpx; border-radius: 24rpx; }
+.empty { color: #94a3b8; font-size: 25rpx; padding: 24rpx 4rpx; }
+.detail { margin-top: 28rpx; }
+.detail .value { max-width: 430rpx; word-break: break-all; line-height: 1.35; }
+.controls { margin-top: 26rpx; }
+.debug-toggle { margin: 28rpx 0 14rpx; color: #2563eb; font-size: 25rpx; text-align: center; }
+.debug-box {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #0f172a;
+  color: #dbeafe;
+  border-radius: 22rpx;
+  padding: 22rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+}

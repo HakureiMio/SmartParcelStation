@@ -1,0 +1,7 @@
+default: clip-node-nrf52810
+build_dir: D:/Project/SmartParcelStation/clip-node-nrf52810/build-codex-verify
+domains:
+  - name: clip-node-nrf52810
+    build_dir: D:/Project/SmartParcelStation/clip-node-nrf52810/build-codex-verify/clip-node-nrf52810
+flash_order:
+  - clip-node-nrf52810

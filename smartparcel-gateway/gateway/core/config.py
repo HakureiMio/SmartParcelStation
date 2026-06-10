@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     sqlite_path: str = Field(alias="SQLITE_PATH")
     mock_nfc_enabled: bool = Field(default=True, alias="MOCK_NFC_ENABLED")
     mock_ble_enabled: bool = Field(default=True, alias="MOCK_BLE_ENABLED")
+    ble_backend: str = Field(default="mock", alias="BLE_BACKEND")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     sync_pull_interval_seconds: int = Field(default=30, alias="SYNC_PULL_INTERVAL_SECONDS")
