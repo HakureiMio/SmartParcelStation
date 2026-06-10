@@ -14,13 +14,6 @@ LOG_MODULE_REGISTER(buzzer, LOG_LEVEL_INF);
 #define BUZZER_CRITICAL_ON_MS  600U
 #define BUZZER_DUTY_DIVIDER    2U
 
-/*
- * Burn verification helper:
- * keep the passive buzzer PWM output low at boot. Comment this macro after
- * verifying P0.16 stays low with a meter or scope.
- */
-#define BUZZER_BOOT_TEST_DEFAULT_LOW 1
-
 static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(DT_ALIAS(buzzer_pwm));
 
 static struct k_work_delayable buzzer_work;
@@ -72,11 +65,7 @@ void buzzer_init(void)
     }
 
     set_buzzer(false);
-#if BUZZER_BOOT_TEST_DEFAULT_LOW
-    (void)pwm_set_dt(&buzzer_pwm, buzzer_pwm.period, 0U);
-    LOG_INF("burn test: passive buzzer PWM held low on P0.16");
-#endif
-    LOG_INF("passive buzzer PWM init on P0.16");
+    LOG_INF("active-low passive buzzer PWM init on P0.16");
 }
 
 void buzzer_play(buzzer_pattern_t pattern)

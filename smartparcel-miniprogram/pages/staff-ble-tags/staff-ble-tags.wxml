@@ -1,10 +1,17 @@
 <view class="page safe ble-page">
   <view class="title">BLE 标签管理</view>
-  <view class="subtitle">通过局域网网关扫描、注册并控制附近标签</view>
+  <view class="subtitle">通过局域网 gateway 扫描、注册并控制附近标签</view>
 
-  <view class="glass-card status-card">
-    <view class="row"><text class="label">网关状态</text><text class="value">{{gatewayState}}</text></view>
-    <view class="row"><text class="label">数据来源</text><text class="value">{{gatewaySource}}</text></view>
+  <view class="glass-card status-card {{gatewaySource}}">
+    <view class="row">
+      <text class="label">网关状态</text>
+      <text class="value">{{gatewayState}}</text>
+    </view>
+    <view class="row">
+      <text class="label">数据来源</text>
+      <text class="value">{{gatewaySourceText}}</text>
+    </view>
+    <view class="error-text" wx:if="{{lastError}}">{{lastError}}</view>
   </view>
 
   <view class="section-title">附近标签</view>

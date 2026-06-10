@@ -1,7 +1,9 @@
 #include "ble_clip_service.h"
 
+#include <errno.h>
 #include <string.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 #if IS_ENABLED(CONFIG_BT)
 #include <zephyr/bluetooth/bluetooth.h>
@@ -35,6 +37,7 @@ static bool notify_enabled;
 static uint8_t last_status_value[] = "SPS:OK";
 static uint8_t last_event[20];
 static uint8_t last_event_len;
+static struct k_work_delayable advertising_work;
 
 static ssize_t cmd_write(struct bt_conn *conn,
                          const struct bt_gatt_attr *attr,
@@ -116,10 +119,43 @@ static const struct bt_data sd[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
+static int start_advertising_once(void)
+{
+    int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+
+    if (err == -EALREADY) {
+        return 0;
+    }
+    if (err) {
+        LOG_ERR("advertising start failed: %d", err);
+        return err;
+    }
+
+    LOG_INF("BLE advertising started");
+    return 0;
+}
+
+static void advertising_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    int err = start_advertising_once();
+    if (err) {
+        LOG_WRN("advertising restart failed: %d, retrying", err);
+        k_work_schedule(&advertising_work, K_MSEC(500));
+    }
+}
+
+static void schedule_advertising_restart(k_timeout_t delay)
+{
+    (void)k_work_reschedule(&advertising_work, delay);
+}
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
     if (err) {
         LOG_WRN("BLE connection failed: %u", err);
+        schedule_advertising_restart(K_MSEC(250));
         return;
     }
 
@@ -138,6 +174,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
     notify_enabled = false;
     LOG_INF("BLE disconnected, reason=%u", reason);
+    schedule_advertising_restart(K_MSEC(250));
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -160,11 +197,8 @@ int ble_clip_service_init(ble_clip_cmd_handler_t handler)
 
     LOG_INF("BLE name: %s", CONFIG_BT_DEVICE_NAME);
 
-    err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-    if (err) {
-        LOG_ERR("advertising start failed: %d", err);
-        return err;
-    }
+    k_work_init_delayable(&advertising_work, advertising_work_handler);
+    schedule_advertising_restart(K_NO_WAIT);
 #endif
 
     LOG_INF("BLE init done (bt=%d)", IS_ENABLED(CONFIG_BT));

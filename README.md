@@ -169,5 +169,6 @@ west build -b clip_node_nrf52810 . -d build -p always
 - `clip-node-nrf52810/README.md`：nRF52810 固件和硬件联调手册。
 - `smartparcel-server/README.md`：中心服务端启动、网关注册和同步说明。
 - `docs/tag_ble_gateway_flow.md`：BLE 标签与 gateway 闭环详细流程。
+- `docs/lan_ble_end_to_end_test_20260610.md`：2026-06-10 局域网 server/gateway/小程序/真实标签闭环测试记录。
 - `docs/legacy_stage_a_mock_flow.md`：历史阶段 A 和 mock NFC 流程归档。
 - `docs/gateway_gate_access_flow.md`：门禁读卡流程设计和当前状态。

@@ -20,7 +20,8 @@ function login(payload) {
     url: '/auth/login',
     method: 'POST',
     data: payload,
-    mock: () => mockLogin(payload)
+    mock: () => mockLogin(payload),
+    useMockWhenRequestFail: true
   })
 }
 
@@ -30,7 +31,8 @@ function register(payload) {
     url: '/auth/register',
     method: 'POST',
     data: payload,
-    mock: () => ({ ok: false, message: '注册功能暂未开放' })
+    mock: () => ({ ok: false, message: '注册功能暂未开放' }),
+    useMockWhenRequestFail: true
   })
 }
 
@@ -40,7 +42,8 @@ function forgotPassword(payload) {
     url: '/auth/forgot-password',
     method: 'POST',
     data: payload,
-    mock: () => ({ ok: false, message: '忘记密码功能暂未开放' })
+    mock: () => ({ ok: false, message: '忘记密码功能暂未开放' }),
+    useMockWhenRequestFail: true
   })
 }
 

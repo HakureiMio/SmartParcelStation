@@ -4,8 +4,8 @@ const CONFIG = {
   demoUserId: '2',
   demoStaffId: 'staff001',
   stationId: '1',
-  useMockWhenRequestFail: true,
+  useMockWhenRequestFail: false,
   enableNfcMock: true,
-  requestTimeoutMs: 1500
+  requestTimeoutMs: 12000
 }
 module.exports = CONFIG

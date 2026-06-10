@@ -105,7 +105,8 @@ class RealBleTagService(BleTagServiceBase):
                     event_future = asyncio.get_running_loop().create_future()
                     with suppress(Exception):
                         await client.start_notify(SPS_TAG_EVENT_NOTIFY_UUID, on_notify)
-                await client.write_gatt_char(SPS_TAG_CMD_WRITE_UUID, build_command(cmd, payload), response=False)
+                await client.write_gatt_char(SPS_TAG_CMD_WRITE_UUID, build_command(cmd, payload), response=True)
+                await asyncio.sleep(0.2)
                 result = self._ok(ble_address, action, f"{action.upper()} command sent")
                 if wait_status and event_future is not None:
                     try:

@@ -47,8 +47,8 @@
 		};
 
 		buzzer_pwm: buzzer_pwm {
-			pwms = <&pwm0 3 PWM_USEC(370) PWM_POLARITY_NORMAL>;
-			label = "Passive buzzer PWM on P0.16";
+			pwms = <&pwm0 3 PWM_USEC(370) PWM_POLARITY_INVERTED>;
+			label = "Active-low passive buzzer PWM on P0.16";
 		};
 	};
 

@@ -2,14 +2,14 @@ const authApi = require('../../services/auth-api')
 const authService = require('../../services/auth-service')
 
 const ROLE_META = {
-  client: { title: '客户端登录', accent: 'client', username: 'user001' },
-  staff: { title: '员工端登录', accent: 'staff', username: 'staff001' }
+  client: { title: '客户登录', accent: 'client', username: 'user001' },
+  staff: { title: '员工登录', accent: 'staff', username: 'staff001' }
 }
 
 Page({
   data: {
     role: 'client',
-    title: '客户端登录',
+    title: '客户登录',
     accent: 'client',
     username: '',
     password: '',
@@ -32,11 +32,11 @@ Page({
     authApi.login({ role: this.data.role, username: this.data.username, password: this.data.password }).then((res) => {
       const data = res.data || {}
       if (!data.token || data.ok === false) {
-        this.setData({ error: data.message || '账号或密码错误', loading: false })
+        this.setData({ error: data.message || res.error || '账号或密码错误', loading: false })
         return
       }
       authService.saveSession(data)
-      wx.showToast({ title: '登录成功', icon: 'success' })
+      wx.showToast({ title: res.source === 'mock' ? '演示登录成功' : '登录成功', icon: 'success' })
       const target = data.role === 'staff' ? '/pages/staff-home/staff-home' : '/pages/user-home/user-home'
       setTimeout(() => wx.redirectTo({ url: target }), 250)
     }).catch(() => {
