@@ -37,6 +37,26 @@ bash scripts/run_qt_panel.sh
 
 `run_qt_panel.sh` 会自动进入 `smartparcel-gateway` 目录，并优先使用 `.venv/bin/python`。
 
+如果希望一键进入 `.venv`、启动 gateway Local API 并打开 Qt 面板：
+
+```bash
+bash scripts/quick_start_gateway_qt_panel.sh
+```
+
+默认会后台启动：
+
+```bash
+python -m gateway.main local-api --host 127.0.0.1 --port 19000
+```
+
+面板关闭后脚本会自动停止该 gateway 进程。日志写入 `logs/quick-start-local-api.log`。
+
+如需启动完整 gateway 循环，可使用：
+
+```bash
+bash scripts/quick_start_gateway_qt_panel.sh run
+```
+
 ## Linux 网关机运行方式
 
 网关机需要具备可用的桌面环境、屏幕和输入设备。面板默认访问：
