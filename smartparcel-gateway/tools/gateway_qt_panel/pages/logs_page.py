@@ -31,6 +31,9 @@ class LogsPage(QWidget):
     def append(self, message: str) -> None:
         self.text.append(message)
 
+    def clear(self) -> None:
+        self.text.clear()
+
     def copy(self) -> None:
         QGuiApplication.clipboard().setText(self.text.toPlainText())
         self.append("日志已复制到剪贴板。")
