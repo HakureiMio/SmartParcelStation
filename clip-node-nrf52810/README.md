@@ -196,9 +196,9 @@ Invoke-RestMethod -Method POST `
 9. 注册扫描到的标签。
 10. 调用 /connect。
 11. 调用 /wake。
-12. 观察 RGB LED 和蜂鸣器。
+12. 观察 RGB LED，并确认蜂鸣器测试阶段保持高电平有效。
 13. 调用 /stop。
-14. 观察 RGB LED 和蜂鸣器停止。
+14. 观察 RGB LED 停止，蜂鸣器测试阶段仍保持高电平有效。
 15. 调用 /status。
 ```
 

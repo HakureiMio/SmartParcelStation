@@ -20,16 +20,18 @@ Confirm SWDIO, SWDCLK, VCC, and GND are connected to the debug probe. These pins
 
 ## 3. Test full-color RGB PWM
 
+- Power on the board.
+- Confirm RGB cycles through multiple colors continuously.
 - Send or mock `WAKE_TAG`.
-- Confirm blue finding blink on `P0.15`.
+- Confirm blue finding blink on `P0.15`, then RGB returns to the rainbow cycle after alert stop.
 - Use firmware effects or direct debug calls to confirm red `P0.11`, green `P0.12`, and blue `P0.15`.
 - Confirm the full-color RGB lamp mixes color through the R/G/B PWM voltage inputs.
 
-## 4. Test passive buzzer PWM
+## 4. Test buzzer active-high output
 
-- Send or mock `WAKE_TAG`.
-- Confirm intermittent PWM tone output on `P0.16`.
-- Send or mock `STOP_ALERT` and confirm the PWM output turns off immediately.
+- Power on the board.
+- Confirm `P0.16` stays at active high level.
+- Send or mock `WAKE_TAG` and `STOP_ALERT`, and confirm `P0.16` remains active high during this test stage.
 
 ## 5. Test clip contact input
 
@@ -49,11 +51,11 @@ Confirm SWDIO, SWDCLK, VCC, and GND are connected to the debug probe. These pins
 - Send or mock `WAKE_TAG`.
 - Confirm state changes to `alerting`.
 - Wait 30 seconds.
-- Confirm RGB and buzzer stop automatically and state returns to `bound` or `idle`.
+- Confirm RGB stops automatically and state returns to `bound` or `idle`; buzzer remains active high during this test stage.
 
 ## 8. Test `STOP_ALERT`
 
 - Send or mock `WAKE_TAG`.
 - Send or mock `STOP_ALERT` before 30 seconds.
-- Confirm RGB and buzzer stop immediately.
+- Confirm RGB stops immediately; buzzer remains active high during this test stage.
 - Confirm state returns to `bound` or `idle`.

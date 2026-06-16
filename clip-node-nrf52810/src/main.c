@@ -204,8 +204,8 @@ int main(void)
     k_work_init_delayable(&alert_timeout_work, alert_timeout_handler);
 
     clip_state_init();
-    led_rgb_init();
     buzzer_init();
+    led_rgb_init();
     remove_sensor_init(handle_remove_change);
     battery_monitor_init();
 
