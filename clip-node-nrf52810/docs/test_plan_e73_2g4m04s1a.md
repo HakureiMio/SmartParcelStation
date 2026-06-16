@@ -6,8 +6,8 @@ This plan verifies the current clip-node firmware on the Ebyte EWT73-2G4M04S1A t
 
 ```powershell
 cd clip-node-nrf52810
-west build -b clip_node_nrf52810 . -p
-west flash
+west build -b clip_node_nrf52810 . -d build -p always
+"D:\Program Files\SEGGER\JLink_V950\JLink.exe" -nogui 1 -CommanderScript tools\jlink_flash.jlink
 ```
 
 Confirm SWDIO, SWDCLK, VCC, and GND are connected to the debug probe. These pins are reserved for debug and power only.

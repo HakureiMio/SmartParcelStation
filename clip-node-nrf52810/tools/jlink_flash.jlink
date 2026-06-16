@@ -1,0 +1,8 @@
+si SWD
+speed 4000
+device NRF52810_XXAA
+r
+loadfile build/clip-node-nrf52810/zephyr/zephyr.hex
+r
+g
+q

@@ -1,9 +1,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "buzzer.h"
 #include "battery_monitor.h"
 #include "ble_clip_service.h"
-#include "buzzer.h"
 #include "clip_protocol.h"
 #include "clip_state.h"
 #include "led_rgb.h"
@@ -53,7 +53,12 @@ static void set_state(clip_state_t new_state)
 static void stop_alert_outputs(void)
 {
     k_work_cancel_delayable(&alert_timeout_work);
-    buzzer_stop();
+    /*
+     * Buzzer output is intentionally disabled during the current BLE bring-up
+     * stage. Battery drive capability is not yet sufficient to support the
+     * buzzer load together with the rest of the system behavior.
+     */
+    /* buzzer_stop(); */
     led_rgb_off();
 }
 
@@ -74,7 +79,7 @@ static void start_finding_alert(void)
 {
     set_state(CLIP_STATE_ALERTING);
     led_rgb_effect_finding();
-    buzzer_play(BUZZER_PATTERN_ALERT);
+    /* buzzer_play(BUZZER_PATTERN_ALERT); */
     k_work_reschedule(&alert_timeout_work, K_MSEC(ALERT_MAX_DURATION_MS));
 }
 
@@ -204,7 +209,7 @@ int main(void)
     k_work_init_delayable(&alert_timeout_work, alert_timeout_handler);
 
     clip_state_init();
-    buzzer_init();
+    /* buzzer_init(); */
     led_rgb_init();
     remove_sensor_init(handle_remove_change);
     battery_monitor_init();

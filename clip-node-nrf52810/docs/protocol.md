@@ -17,8 +17,8 @@ The clip node uses a compact binary frame for BLE/GATT payloads and mock test in
 | Value | Name | Behavior |
 | --- | --- | --- |
 | `0x01` | `PING` | Reply with `PONG` |
-| `0x02` | `WAKE_TAG` | Enter `alerting`, blink RGB, beep intermittently, auto-stop after 30 seconds |
-| `0x03` | `STOP_ALERT` | Turn off RGB/buzzer and return to `bound` or `idle` |
+| `0x02` | `WAKE_TAG` | Enter `alerting`, drive RGB finding indication, auto-stop after 30 seconds. In the current battery-powered validation build, buzzer output is intentionally disabled. |
+| `0x03` | `STOP_ALERT` | Turn off RGB indication and return to `bound` or `idle`. Buzzer remains disabled in the current battery-powered validation build. |
 | `0x04` | `SET_BINDING` | Store a short binding token, then enter `bound` |
 | `0x05` | `CLEAR_BINDING` | Clear local binding token and enter `idle` |
 | `0x06` | `READ_STATUS` | Sample battery and report state |

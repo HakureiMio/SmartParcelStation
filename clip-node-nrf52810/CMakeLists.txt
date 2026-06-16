@@ -7,6 +7,7 @@ project(clip_node_nrf52810)
 
 target_sources(app PRIVATE
   src/main.c
+  src/early_gpio_test.c
   src/clip_state.c
   src/ble_clip_service.c
   src/led_rgb.c

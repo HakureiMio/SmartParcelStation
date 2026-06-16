@@ -9,22 +9,22 @@
 LOG_MODULE_REGISTER(led_rgb, LOG_LEVEL_INF);
 
 #define RGB_LEVEL_MAX 6
-#define RGB_RAINBOW_STEP_MS 300U
+#define RGB_RAINBOW_STEP_MS 60U
+#define RGB_RAINBOW_BLEND_STEPS 6U
 
 static const struct pwm_dt_spec red_pwm = PWM_DT_SPEC_GET(DT_ALIAS(led_red_pwm));
 static const struct pwm_dt_spec green_pwm = PWM_DT_SPEC_GET(DT_ALIAS(led_green_pwm));
 static const struct pwm_dt_spec blue_pwm = PWM_DT_SPEC_GET(DT_ALIAS(led_blue_pwm));
 
 static const uint8_t level_to_duty[7] = {0, 2, 5, 10, 20, 40, 70};
-static const rgb_level_t rainbow_levels[] = {
+static const rgb_level_t rainbow_anchor_levels[] = {
     {.r = 6, .g = 0, .b = 0},
-    {.r = 6, .g = 2, .b = 0},
     {.r = 5, .g = 5, .b = 0},
     {.r = 0, .g = 6, .b = 0},
     {.r = 0, .g = 4, .b = 4},
     {.r = 0, .g = 0, .b = 6},
-    {.r = 3, .g = 0, .b = 5},
-    {.r = 5, .g = 0, .b = 3},
+    {.r = 4, .g = 0, .b = 5},
+    {.r = 6, .g = 0, .b = 2},
 };
 
 static struct k_work_delayable blink_work;
@@ -35,6 +35,7 @@ static uint8_t blink_cycles_left;
 static bool blink_is_on;
 static bool rainbow_enabled;
 static uint8_t rainbow_index;
+static uint8_t rainbow_blend_step;
 
 static int set_one_pwm(const struct pwm_dt_spec *pwm, uint8_t level)
 {
@@ -74,7 +75,26 @@ static void start_rainbow(void)
 {
     rainbow_enabled = true;
     blink_is_on = false;
+    rainbow_index = 0U;
+    rainbow_blend_step = 0U;
     k_work_schedule(&blink_work, K_NO_WAIT);
+}
+
+static uint8_t blend_channel(uint8_t start, uint8_t end, uint8_t step, uint8_t total_steps)
+{
+    return (uint8_t)(((start * (total_steps - step)) + (end * step)) / total_steps);
+}
+
+static rgb_level_t rainbow_current_level(void)
+{
+    rgb_level_t start = rainbow_anchor_levels[rainbow_index];
+    rgb_level_t end = rainbow_anchor_levels[(rainbow_index + 1U) % ARRAY_SIZE(rainbow_anchor_levels)];
+
+    return (rgb_level_t) {
+        .r = blend_channel(start.r, end.r, rainbow_blend_step, RGB_RAINBOW_BLEND_STEPS),
+        .g = blend_channel(start.g, end.g, rainbow_blend_step, RGB_RAINBOW_BLEND_STEPS),
+        .b = blend_channel(start.b, end.b, rainbow_blend_step, RGB_RAINBOW_BLEND_STEPS),
+    };
 }
 
 static void blink_work_handler(struct k_work *work)
@@ -82,10 +102,14 @@ static void blink_work_handler(struct k_work *work)
     ARG_UNUSED(work);
 
     if (rainbow_enabled) {
-        apply_level(rainbow_levels[rainbow_index]);
-        rainbow_index++;
-        if (rainbow_index >= ARRAY_SIZE(rainbow_levels)) {
-            rainbow_index = 0;
+        apply_level(rainbow_current_level());
+        rainbow_blend_step++;
+        if (rainbow_blend_step > RGB_RAINBOW_BLEND_STEPS) {
+            rainbow_blend_step = 0U;
+            rainbow_index++;
+            if (rainbow_index >= ARRAY_SIZE(rainbow_anchor_levels)) {
+                rainbow_index = 0U;
+            }
         }
         k_work_schedule(&blink_work, K_MSEC(RGB_RAINBOW_STEP_MS));
         return;

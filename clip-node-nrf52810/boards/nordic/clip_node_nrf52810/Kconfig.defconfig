@@ -21,9 +21,9 @@ config UART_CONSOLE
 	default n
 
 config USE_SEGGER_RTT
-	default y
+	default n
 
 config LOG_BACKEND_RTT
-	default y
+	default n
 
 endif # BOARD_CLIP_NODE_NRF52810

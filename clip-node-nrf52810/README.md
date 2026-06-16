@@ -1,76 +1,79 @@
 # clip-node-nrf52810
 
-## 1. 固件定位
+## 1. 项目说明
 
-`clip-node-nrf52810` 是 SmartParcelStation 的 nRF52810 智能寻物标签固件工程。当前用于验证 gateway 通过 BLE 控制标签，触发 RGB LED 和蜂鸣器，读取标签状态，并为后续触点检测、电池检测和状态上报保留基础结构。
+`clip-node-nrf52810` 是 SmartParcelStation 项目的 nRF52810 夹具节点固件工程。
+
+当前阶段主要用于验证以下能力：
+
+- BLE Peripheral 广播与 GATT 服务
+- RGB 灯状态指示
+- 拆卸检测输入
+- 电池电压采样
+- 网关到标签的基础命令链路
 
 ## 2. 当前硬件平台
 
-当前测试硬件：
+当前调试硬件：
 
 ```text
 EWT73-2G4M04S1A 测试套件
 E73-2G4M04S1A / nRF52810 模组
 3.3V 供电
-ST-LINK 或其他 SWD 调试器
+J-Link SWD 调试
 ```
 
-正式智能寻物标签应使用单独 E73 小模组设计自研 PCB，测试套件只用于固件和引脚验证。
+说明：
 
-## 3. 当前 BLE 能力
+- 当前仓库面向测试板和现阶段联调。
+- 后续量产应切换到自定义 PCB，并重新核对引脚映射与电源能力。
 
-固件已启用 BLE Peripheral，并提供 SPS Tag GATT Service。
+## 3. 当前功能状态
 
-gateway 可通过 `CMD_WRITE` 写入轻量二进制命令帧；标签通过 `EVENT_NOTIFY` 上报事件，并提供 `STATUS_READ` 读取入口。
+当前版本已恢复 BLE 主流程，主要包括：
 
-`mock_receive_cmd` 仅保留为本地测试入口，不是当前主通信路径。
+- BLE 初始化与广播
+- `SPS Tag` GATT Service
+- 命令接收与事件上报
+- RGB 灯提示
+- 拆卸检测与电池采样
 
-## 4. BLE 命名规范
+当前阶段蜂鸣器策略如下：
 
-当前测试默认名称：
+- 已保留蜂鸣器相关代码接口
+- 业务调用已暂时注释/禁用
+- 原因是当前电池供电能力不足，暂时不能稳定支撑蜂鸣器与 RGB 灯同时工作
 
-```text
-SPS-F01-20260610-0001
+因此，现阶段请按下面原则理解：
+
+- `WAKE_TAG` 等业务流程可继续验证 BLE 与 RGB
+- 暂时禁止蜂鸣器和 RGB 灯同时工作
+- 蜂鸣器恢复启用前，应先完成电源能力与负载评估
+
+## 4. BLE 信息
+
+当前固件使用 BLE Peripheral 模式。
+
+当前设备名配置在 `prj.conf` 中，例如：
+
+```conf
+CONFIG_BT_DEVICE_NAME="SPS-F02-20260611-0001"
 ```
 
-格式：
+命名方式定为“产品名-生产商名-生产日期-生产编号”
 
-```text
-SPS-{factory_code}-{production_date}-{serial_no}
-```
+## 5. GATT 服务
 
-示例：
-
-```text
-SPS-F01-20260610-0001
-SPS-F01-20260610-0002
-SPS-F02-20260611-0001
-```
-
-第一阶段 BLE 名称写在 `prj.conf` 中。后续批量生产应通过 NVS 或产测工具写入唯一出厂信息。
-
-## 5. GATT Service 设计
-
-UUID：
+当前服务 UUID：
 
 ```text
 Service UUID:       8f7e9000-5d1b-4c2f-9e8a-5f2f5b7b0001
-CMD_WRITE UUID:    8f7e9001-5d1b-4c2f-9e8a-5f2f5b7b0001
-EVENT_NOTIFY UUID: 8f7e9002-5d1b-4c2f-9e8a-5f2f5b7b0001
-STATUS_READ UUID:  8f7e9003-5d1b-4c2f-9e8a-5f2f5b7b0001
+CMD_WRITE UUID:     8f7e9001-5d1b-4c2f-9e8a-5f2f5b7b0001
+EVENT_NOTIFY UUID:  8f7e9002-5d1b-4c2f-9e8a-5f2f5b7b0001
+STATUS_READ UUID:   8f7e9003-5d1b-4c2f-9e8a-5f2f5b7b0001
 ```
 
-命令帧：
-
-```text
-[0] 0xA5
-[1] command
-[2] payload_len
-[3..] payload
-[last] xor checksum
-```
-
-支持命令：
+当前支持的基础命令：
 
 ```text
 PING
@@ -81,131 +84,102 @@ CLEAR_BINDING
 READ_STATUS
 ```
 
-当前 `WAKE_TAG` 的 `color/duration` payload 在标签侧尚未完全用于多颜色和动态时长控制，默认执行寻物闪烁和蜂鸣。
+补充说明：
 
-## 6. 引脚连接
+- `WAKE_TAG` 当前以 RGB 提示为主
+- 由于电池供电限制，当前不启用蜂鸣器联动
 
-当前测试引脚见 `docs/hardware_pins.md`。常用连接：
+## 6. 主要引脚
 
-```text
-PIN_LED_R_PWM = P0.11
-PIN_LED_G_PWM = P0.12
-PIN_LED_B_PWM = P0.15
-PIN_BUZZER_CTRL = P0.16
-PIN_REMOVE_SENSE = P0.19
-PIN_BAT_ADC = P0.02 / AIN0
-PIN_BAT_DIV_EN = P0.20
-PIN_USER_BTN = P0.21
-PIN_STATUS_LED = P0.22
-```
+详细映射见 [docs/hardware_pins.md](D:/Project/SmartParcelStation/clip-node-nrf52810/docs/hardware_pins.md:1)。
 
-调试器与目标板必须共地，模块供电不得超过 3.6V。
-
-## 7. 编译环境
-
-请在 nRF Connect SDK / Nordic Toolchain Terminal 中执行 `west build`。
-
-不要使用 `smartparcel-gateway/.venv` 中的 Python 或 `west` 编译固件。gateway 的 `.venv` 只用于 Python 网关项目。
-
-本工程使用自定义 board：
+当前常用引脚：
 
 ```text
-clip_node_nrf52810
+RGB_R         P0.11
+RGB_G         P0.12
+RGB_B         P0.15
+BUZZER_CTRL   P0.16
+REMOVE_SENSE  P0.19
+BAT_ADC       P0.02 / AIN0
+BAT_DIV_EN    P0.20
+USER_BTN      P0.21
+STATUS_LED    P0.22
 ```
 
-除非明确要临时移植到 Nordic DK，否则不要使用 `nrf52dk_nrf52810` 作为默认 board。
+## 7. 编译
 
-## 8. 编译固件
+请在 Nordic Toolchain Terminal 或正确配置过环境的终端中执行。
 
 推荐命令：
 
 ```powershell
-cd clip-node-nrf52810
 west build -b clip_node_nrf52810 . -d build -p always
 ```
 
-编译产物只用于本地烧录，不应提交到 Git。不要提交 `build/`、`.hex`、`.bin`、`.elf`、`.map` 等文件。
+说明：
 
-## 9. ST-LINK + OpenOCD 烧录
+- 不要把 `build/` 目录产物提交到 Git。
+- `nRF52810` RAM 资源较紧，新增功能时要谨慎控制日志、栈和 BLE 缓冲配置。
 
-连接验证：
+## 8. 使用 J-Link 烧录
 
-```powershell
-openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; targets; shutdown"
-```
-
-擦除：
+### 方式 A：使用 west runner
 
 ```powershell
-openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; nrf52 mass_erase; shutdown"
+west flash --runner jlink
 ```
 
-烧录：
+如果该方式无法正常连接探针，可改用方式 B。
+
+### 方式 B：使用 J-Link Commander 脚本
+
+当前脚本文件：
+
+- [tools/jlink_flash.jlink](D:/Project/SmartParcelStation/clip-node-nrf52810/tools/jlink_flash.jlink:1)
+
+当前命令：
 
 ```powershell
-openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; program build/merged.hex verify reset; shutdown"
+& "D:\Program Files\SEGGER\JLink_V950\JLink.exe" -nogui 1 -CommanderScript .\tools\jlink_flash.jlink
 ```
 
-当前 sysbuild 场景常见产物是 `build/merged.hex`。如果使用普通 Zephyr 构建，产物也可能位于 `build/zephyr/merged.hex`，对应命令为：
-
-```powershell
-openocd -f interface/stlink.cfg -f target/nrf52.cfg -c "adapter speed 1000; init; reset halt; program build/zephyr/merged.hex verify reset; shutdown"
-```
-
-如果 `merged.hex` 不存在，说明 build 失败或产物路径不同，先检查：
-
-```powershell
-Get-ChildItem .\build\
-Get-ChildItem .\build\zephyr\
-```
-
-## 10. 与 gateway real BLE 联调
-
-联调链路：
+当前脚本内容：
 
 ```text
-smartparcel-gateway BLE_BACKEND=real
-  -> bleak 扫描 SPS-F01-20260610-0001
-  -> 连接标签
-  -> CMD_WRITE 写入 WAKE_TAG / STOP_ALERT / READ_STATUS
-  -> 标签驱动 RGB LED / 蜂鸣器
+si SWD
+speed 4000
+device NRF52810_XXAA
+r
+loadfile build/clip-node-nrf52810/zephyr/zephyr.hex
+r
+g
+q
 ```
 
-PowerShell 可先直接调用 gateway API，再接小程序：
+注意事项：
 
-```powershell
-Invoke-RestMethod -Method POST `
-  -Uri "http://127.0.0.1:19000/local/tags/scan" `
-  -ContentType "application/json" `
-  -Body '{"timeout_sec":5}'
-```
+- 在 PowerShell 中执行带空格路径的 `JLink.exe` 时，要在前面加 `&`
+- 当前脚本默认烧录 `build/clip-node-nrf52810/zephyr/zephyr.hex`
+- 如果构建输出路径变化，需要同步修改 `tools/jlink_flash.jlink` 中的 `loadfile`
+- 目标芯片名称使用 `NRF52810_XXAA`
 
-## 11. 本地硬件自检
+## 9. 当前联调建议
 
-建议流程：
+建议当前按下面顺序联调：
 
-```text
-1. 编译固件。
-2. 烧录固件。
-3. 打开 RTT 日志。
-4. 确认启动 banner。
-5. 确认 BLE name: SPS-F01-20260610-0001。
-6. 启动 gateway local API。
-7. 设置 BLE_BACKEND=real。
-8. 小程序或 PowerShell 调用 /local/tags/scan。
-9. 注册扫描到的标签。
-10. 调用 /connect。
-11. 调用 /wake。
-12. 观察 RGB LED，并确认蜂鸣器测试阶段保持高电平有效。
-13. 调用 /stop。
-14. 观察 RGB LED 停止，蜂鸣器测试阶段仍保持高电平有效。
-15. 调用 /status。
-```
+1. 编译固件
+2. 使用 J-Link 烧录
+3. 上电观察 BLE 是否开始广播
+4. 使用网关或调试工具连接 BLE
+5. 验证 `PING` / `READ_STATUS`
+6. 验证 `WAKE_TAG` 下 RGB 表现
+7. 暂不验证蜂鸣器与 RGB 同时动作
 
-## 12. 已知限制
+## 10. 当前限制
 
-1. 当前 `WAKE_TAG` 的 `color/duration` payload 在标签侧尚未完全用于多颜色和动态时长控制，默认执行寻物闪烁和蜂鸣。
-2. 第一阶段 BLE 名称写死在 `prj.conf`，后续批量生产应通过 NVS 或产测工具写入唯一出厂信息。
-3. 当前主要验证单标签连接和控制，多标签并发调度后续再做。
-4. 当前重点是员工小程序 -> gateway -> 标签，不代表门禁流程已经完全迁移到 real BLE。
-5. nRF52810 RAM 资源有限，新增功能需要谨慎控制日志、栈和 BLE 缓冲配置。
+1. 当前电池供电能力不足，暂时禁止蜂鸣器与 RGB 灯同时工作。
+2. 蜂鸣器业务代码已保留，但当前版本默认禁用其联动调用。
+3. 当前优先目标是 BLE 通路、RGB 指示、状态读写与基础硬件稳定性。
+4. `nRF52810` RAM 较小，恢复更多功能前需要持续控制内存占用。
+

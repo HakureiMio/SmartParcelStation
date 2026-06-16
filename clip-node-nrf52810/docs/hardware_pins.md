@@ -11,7 +11,7 @@ The test kit is suitable for firmware bring-up and GPIO/PWM/ADC verification. Th
 | `PIN_LED_R_PWM` | `P0.11` | Full-color RGB red PWM voltage input |
 | `PIN_LED_G_PWM` | `P0.12` | Full-color RGB green PWM voltage input |
 | `PIN_LED_B_PWM` | `P0.15` | Full-color RGB blue PWM voltage input |
-| `PIN_BUZZER_CTRL` | `P0.16` | Active-high buzzer test output, held active after boot |
+| `PIN_BUZZER_CTRL` | `P0.16` | Active-high buzzer control output. Temporarily left unused in the BLE validation build because the current battery path cannot reliably support buzzer load. |
 | `PIN_REMOVE_SENSE` | `P0.19` | Clip contact/remove detect input |
 | `PIN_BAT_ADC` | `P0.02 / AIN0` | Battery divider ADC input |
 | `PIN_BAT_DIV_EN` | `P0.20` | Battery divider enable output |
