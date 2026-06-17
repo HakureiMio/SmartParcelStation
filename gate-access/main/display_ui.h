@@ -1,0 +1,14 @@
+#pragma once
+
+#include "esp_err.h"
+#include "gateway_client.h"
+
+esp_err_t display_ui_init(void);
+void display_ui_show_booting(void);
+void display_ui_show_network_status(const char *text);
+void display_ui_show_pn532_status(const char *text);
+void display_ui_show_wait_card(void);
+void display_ui_show_uid(const char *uid);
+void display_ui_show_uploading(void);
+void display_ui_show_access_result(const gateway_access_result_t *result);
+void display_ui_show_error(const char *title, const char *detail);
