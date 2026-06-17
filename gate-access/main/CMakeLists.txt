@@ -9,8 +9,13 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         driver
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_uart
         esp_event
+        esp_hw_support
+        esp_lcd
         esp_timer
         nvs_flash
-        json
+        espressif__cjson
 )
