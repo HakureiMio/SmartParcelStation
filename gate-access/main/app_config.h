@@ -15,6 +15,7 @@
  * SPS_DEMO_TOUCH_COLOR_TEST    触摸点击切换颜色
  * SPS_DEMO_FORCE_WHITE_SCREEN  持续白屏，用于判断背光是否打开
  * SPS_DEMO_WIFI_ENABLE         在 display-first 模式下同时启动 ESP8266 WiFi
+ * SPS_DEMO_PN532_UID_TEST      在 display-first 模式下持续读取并打印卡 UID
  *                              启用后：触摸 + 屏幕 + WiFi 联调
  *                              关闭后：仅触摸 + 屏幕
  * SPS_DEMO_ESP8266_OPEN_AP_TEST ESP8266 AT 测试（仅 SPS_DEMO_DISPLAY_FIRST=0 时有效）
@@ -29,6 +30,7 @@
 #define SPS_DEMO_TOUCH_COLOR_TEST       1
 #define SPS_DEMO_FORCE_WHITE_SCREEN     0
 #define SPS_DEMO_WIFI_ENABLE            1
+#define SPS_DEMO_PN532_UID_TEST         1
 #define SPS_DEMO_ESP8266_OPEN_AP_TEST   0
 #define SPS_ESP8266_CONNECT_ONLY_TEST   0
 
@@ -80,7 +82,7 @@
 #define SPS_PN532_I2C_FREQ_HZ       100000
 #define SPS_PN532_I2C_ADDR          0x24
 #define SPS_CARD_DEBOUNCE_MS        3000
-#define SPS_CARD_POLL_INTERVAL_MS   300
+#define SPS_CARD_POLL_INTERVAL_MS   100
 
 #define SPS_HTTP_RESPONSE_MAX       2048
 

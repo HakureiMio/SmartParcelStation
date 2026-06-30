@@ -1,8 +1,10 @@
+import re
 import uuid
 import hashlib
 import secrets
 import hmac
 import base64
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -10,8 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.security import create_access_token, _record_security_audit
 from app.models.enums import (
     EventSource,
+    GatewayFactoryDeviceStatus,
     GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
@@ -24,7 +28,22 @@ from app.models.enums import (
     SyncStatus,
     UserRole,
 )
-from app.models.models import Gateway, GatewayRegistrationToken, GatewaySyncEvent, Notification, Parcel, ParcelTagBinding, PickupEvent, Station, Tag, User
+from app.models.models import (
+    Gateway,
+    GatewayFactoryDevice,
+    GatewayRegistrationToken,
+    GatewaySyncEvent,
+    Notification,
+    Parcel,
+    ParcelTagBinding,
+    PickupEvent,
+    SecurityAuditEvent,
+    Station,
+    Tag,
+    User,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _not_found(name: str) -> HTTPException:
@@ -74,8 +93,9 @@ async def login_with_password(db: AsyncSession, role: str, username: str, passwo
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='账号或密码错误')
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='账号已停用')
+    token = create_access_token(user_id=user.id, role=public_role(user.role), station_id=user.station_id)
     return {
-        'token': f'demo-token-{user.id}-{secrets.token_urlsafe(24)}',
+        'token': token,
         'user_id': str(user.id),
         'role': public_role(user.role),
         'display_name': user.display_name,
@@ -122,32 +142,63 @@ async def patch_user(db: AsyncSession, user_id: int, data: dict) -> User:
 
 
 async def ensure_default_users(db: AsyncSession) -> list[User]:
+    """Initialize demo station + 2 real accounts for graduation project demo.
+
+    Creates:
+      - station_admin001 / STAFF  — miniprogram staff portal & gateway binding
+      - demo_user001 / USER       — miniprogram user demo
+    Old default accounts (admin001, user001, staff001, gateway001) are deactivated
+    if they exist; they are no longer created.
+    """
+    settings = get_settings()
+
+    # Ensure demo station exists
     default_station = await db.get(Station, 1)
     if not default_station:
         db.add(Station(id=1, station_code='ST001', name='主站点', address='示例路1号', status='ACTIVE'))
         await db.flush()
 
-    defaults = [
-        {'id': 1, 'username': 'admin001', 'password': '123456', 'display_name': '系统管理员', 'phone': '18800000001', 'role': UserRole.SERVER_ADMIN, 'station_id': None},
-        {'id': 2, 'username': 'user001', 'password': '123456', 'display_name': '用户 002', 'phone': '18800000002', 'role': UserRole.USER, 'station_id': 1},
-        {'id': 3, 'username': 'staff001', 'password': '123456', 'display_name': '员工 001', 'phone': '18800000003', 'role': UserRole.STAFF, 'station_id': 1},
-        {'id': 4, 'username': 'gateway001', 'password': '123456', 'display_name': '网关管理员', 'phone': '18800000004', 'role': UserRole.GATEWAY_ADMIN, 'station_id': 1},
+    # Deactivate legacy default accounts
+    legacy_usernames = ['admin001', 'user001', 'staff001', 'gateway001']
+    legacy_result = await db.execute(select(User).where(User.username.in_(legacy_usernames)))
+    for u in legacy_result.scalars().all():
+        if u.username not in {settings.default_station_admin_username, settings.default_demo_user_username}:
+            u.is_active = False
+
+    accounts = [
+        {
+            'username': settings.default_station_admin_username,
+            'password': settings.default_station_admin_password,
+            'display_name': '站点管理员',
+            'phone': '18800000001',
+            'role': UserRole.STAFF,
+            'station_id': 1,
+        },
+        {
+            'username': settings.default_demo_user_username,
+            'password': settings.default_demo_user_password,
+            'display_name': '演示用户',
+            'phone': '18800000002',
+            'role': UserRole.USER,
+            'station_id': 1,
+        },
     ]
     users: list[User] = []
-    for item in defaults:
-        user = await db.get(User, item['id'])
+    for item in accounts:
+        username = item.pop('username')
         password = item.pop('password')
+        result = await db.execute(select(User).where(User.username == username))
+        user = result.scalar_one_or_none()
         if user:
-            user.username = item['username']
             user.display_name = item['display_name']
             user.phone = item['phone']
             user.role = item['role']
             user.station_id = item['station_id']
             user.is_active = True
-            if not user.password_hash:
+            if not user.password_hash or user.password_hash != hash_password(password):
                 user.password_hash = hash_password(password)
         else:
-            user = User(**item, password_hash=hash_password(password), is_active=True)
+            user = User(username=username, password_hash=hash_password(password), is_active=True, **item)
             db.add(user)
         users.append(user)
     await db.commit()
@@ -183,8 +234,24 @@ async def gateway_heartbeat(db: AsyncSession, gateway_code: str, status_value: s
     gateway = result.scalar_one_or_none()
     if not gateway:
         raise _not_found('gateway')
+    now = datetime.now(timezone.utc)
     gateway.status = status_value
-    gateway.last_seen_at = datetime.now(timezone.utc)
+    gateway.last_seen_at = now
+
+    # Sync factory device status to ONLINE on successful heartbeat
+    if gateway.gateway_factory_code and status_value in ('ONLINE',):
+        factory_result = await db.execute(
+            select(GatewayFactoryDevice).where(
+                GatewayFactoryDevice.gateway_factory_code == gateway.gateway_factory_code
+            )
+        )
+        factory_device = factory_result.scalar_one_or_none()
+        if factory_device:
+            factory_device.status = GatewayFactoryDeviceStatus.ONLINE
+            factory_device.last_seen_at = now
+            factory_device.bound_gateway_id = gateway.id
+            factory_device.gateway_code = gateway_code
+
     await db.commit()
     await db.refresh(gateway)
     return gateway
@@ -229,6 +296,10 @@ async def create_gateway_registration_token(
     station_id: int,
     ttl_seconds: int | None,
     created_by_admin_id: int | None,
+    gateway_factory_code: str | None = None,
+    gateway_device_id: str | None = None,
+    gateway_serial: str | None = None,
+    created_by_user_id: int | None = None,
 ) -> tuple[GatewayRegistrationToken, str]:
     await get_station(db, station_id)
     settings = get_settings()
@@ -245,6 +316,10 @@ async def create_gateway_registration_token(
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=effective_ttl),
         status=GatewayRegistrationTokenStatus.PENDING,
         created_by_admin_id=created_by_admin_id,
+        created_by_user_id=created_by_user_id,
+        gateway_factory_code=gateway_factory_code,
+        gateway_device_id=gateway_device_id,
+        gateway_serial=gateway_serial,
     )
     db.add(row)
     await db.commit()
@@ -282,6 +357,7 @@ async def activate_gateway_registration(
     gateway_code: str,
     station_id: int,
     registration_token: str,
+    device_info: dict | None = None,
 ) -> tuple[Gateway, str]:
     await get_station(db, station_id)
     result = await db.execute(
@@ -302,17 +378,307 @@ async def activate_gateway_registration(
         await db.commit()
         raise HTTPException(status_code=401, detail='Registration token expired')
 
+    device_info = device_info or {}
+    factory_code_from_token = token_row.gateway_factory_code
+    factory_code_from_device = device_info.get('gateway_factory_code', '')
+    device_id_from_token = token_row.gateway_device_id
+    device_id_from_device = device_info.get('gateway_device_id', '')
+
+    # Validate factory code match if token was created with one
+    if factory_code_from_token:
+        if not factory_code_from_device:
+            raise HTTPException(status_code=401, detail='gateway_factory_code required in device_info')
+        if factory_code_from_token.upper() != factory_code_from_device.upper():
+            raise HTTPException(status_code=401, detail='gateway_factory_code does not match registration token')
+    if device_id_from_token and device_id_from_device:
+        if device_id_from_token != device_id_from_device:
+            raise HTTPException(status_code=401, detail='gateway_device_id does not match registration token')
+
+    # Check factory device is not DISABLED/REVOKED
+    effective_factory_code = factory_code_from_token or factory_code_from_device or None
+    if effective_factory_code:
+        factory_result = await db.execute(
+            select(GatewayFactoryDevice).where(
+                GatewayFactoryDevice.gateway_factory_code == effective_factory_code
+            )
+        )
+        factory_device = factory_result.scalar_one_or_none()
+        if factory_device and factory_device.status in {GatewayFactoryDeviceStatus.DISABLED, GatewayFactoryDeviceStatus.REVOKED}:
+            raise HTTPException(status_code=401, detail='Gateway factory device is disabled or revoked')
+
     settings = get_settings()
     gateway_secret = generate_gateway_secret(settings.gateway_secret_bytes)
-    gateway = await register_gateway(
-        db,
-        {'gateway_code': gateway_code, 'station_id': station_id, 'device_secret_hash': gateway_secret, 'status': 'ACTIVE'},
-    )
+
+    # Create or update gateway record
+    existing_result = await db.execute(select(Gateway).where(Gateway.gateway_code == gateway_code))
+    gateway = existing_result.scalar_one_or_none()
+    gateway_device_id = device_info.get('gateway_device_id', '') or token_row.gateway_device_id or None
+    gateway_serial = device_info.get('gateway_serial', '') or token_row.gateway_serial or None
+
+    if gateway:
+        gateway.station_id = station_id
+        gateway.device_secret_hash = gateway_secret
+        gateway.status = 'ACTIVE'
+        gateway.gateway_factory_code = effective_factory_code
+        gateway.gateway_device_id = gateway_device_id
+        gateway.gateway_serial = gateway_serial
+        gateway.bound_at = now
+        gateway.last_seen_at = now
+    else:
+        gateway = Gateway(
+            gateway_code=gateway_code,
+            station_id=station_id,
+            device_secret_hash=gateway_secret,
+            status='ACTIVE',
+            gateway_factory_code=effective_factory_code,
+            gateway_device_id=gateway_device_id,
+            gateway_serial=gateway_serial,
+            bound_at=now,
+            last_seen_at=now,
+        )
+        db.add(gateway)
+        await db.flush()
+
+    # Update factory device status
+    if effective_factory_code and factory_device:
+        factory_device.status = GatewayFactoryDeviceStatus.BOUND
+        factory_device.bound_gateway_id = gateway.id
+        factory_device.gateway_code = gateway_code
+        factory_device.station_id = station_id
+        factory_device.bound_at = now
+        factory_device.last_seen_at = now
+
+    # Mark token as used
     token_row.status = GatewayRegistrationTokenStatus.USED
     token_row.used_at = now
     await db.commit()
     await db.refresh(gateway)
+
+    # Security audit
+    await _record_security_audit(
+        db, 'gateway_bootstrap_activate_success',
+        None, gateway_code, '/api/v1/gateways/bootstrap/activate',
+        None, {'gateway_factory_code': effective_factory_code, 'token_id': token_row.token_id},
+    )
+
     return gateway, gateway_secret
+
+
+# ── Gateway Provisioning ──
+
+
+def _auto_gateway_code(factory_code: str) -> str:
+    """Generate a gateway_code from factory_code suffix, e.g. SPS-GW-20260630-0001 → GW0001."""
+    m = re.search(r'([A-Z0-9]{4,8})$', factory_code)
+    if m:
+        return f'GW{m.group(1)}'
+    return f'GW{secrets.token_hex(4).upper()[:8]}'
+
+
+async def prepare_gateway_provisioning(
+    db: AsyncSession,
+    gateway_factory_code: str,
+    station_id: int,
+    requested_gateway_code: str | None,
+    gateway_device_id: str | None,
+    gateway_serial: str | None,
+    current_user: User,
+) -> dict:
+    """Prepare a provisioning request for a gateway device.
+
+    Records the factory device, creates a short-lived registration token, and
+    returns binding parameters to the staff member. Does NOT return gateway_secret.
+    """
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    normalized_factory_code = gateway_factory_code.strip().upper()
+
+    # Validate format
+    pattern = settings.gateway_factory_code_pattern
+    if not re.match(pattern, normalized_factory_code):
+        raise HTTPException(status_code=400, detail=f'gateway_factory_code must match pattern {pattern}')
+
+    # Validate station
+    await get_station(db, station_id)
+
+    # STAFF can only bind to own station
+    if current_user.role == UserRole.STAFF and current_user.station_id != station_id:
+        raise HTTPException(status_code=403, detail='You can only bind gateways to your own station')
+
+    # Resolve or create factory device
+    factory_result = await db.execute(
+        select(GatewayFactoryDevice).where(GatewayFactoryDevice.gateway_factory_code == normalized_factory_code)
+    )
+    factory_device = factory_result.scalar_one_or_none()
+    is_new_device = False
+
+    if factory_device:
+        if factory_device.status in {GatewayFactoryDeviceStatus.DISABLED, GatewayFactoryDeviceStatus.REVOKED}:
+            raise HTTPException(status_code=409, detail=f'Gateway factory device is {factory_device.status.value}')
+        # If already bound to a different gateway
+        if factory_device.status in {GatewayFactoryDeviceStatus.BOUND, GatewayFactoryDeviceStatus.ONLINE}:
+            raise HTTPException(status_code=409, detail='Gateway factory code is already bound')
+    else:
+        is_new_device = True
+        factory_device = GatewayFactoryDevice(
+            gateway_factory_code=normalized_factory_code,
+            gateway_device_id=gateway_device_id or None,
+            gateway_serial=gateway_serial or None,
+            status=GatewayFactoryDeviceStatus.PENDING_BIND,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        db.add(factory_device)
+        await db.flush()
+
+    if is_new_device:
+        await _record_security_audit(
+            db, 'gateway_factory_device_first_seen',
+            None, None, None, None,
+            {'gateway_factory_code': normalized_factory_code},
+        )
+
+    # Determine gateway_code
+    gateway_code = (requested_gateway_code or '').strip()
+    if not gateway_code:
+        gateway_code = _auto_gateway_code(normalized_factory_code)
+
+    # Check gateway_code not already taken by another active gateway
+    existing_gw = await db.execute(
+        select(Gateway).where(Gateway.gateway_code == gateway_code, Gateway.status.in_(['ACTIVE', 'ONLINE']))
+    )
+    if existing_gw.scalar_one_or_none():
+        # Auto-generate alternative
+        gateway_code = f'{gateway_code}-{secrets.token_hex(2).upper()[:4]}'
+
+    # Create registration token
+    token_row, plain_token = await create_gateway_registration_token(
+        db,
+        gateway_code=gateway_code,
+        station_id=station_id,
+        ttl_seconds=settings.gateway_registration_token_ttl_seconds,
+        created_by_admin_id=None,
+        gateway_factory_code=normalized_factory_code,
+        gateway_device_id=gateway_device_id or None,
+        gateway_serial=gateway_serial or None,
+        created_by_user_id=current_user.id,
+    )
+
+    # Update factory device
+    factory_device.status = GatewayFactoryDeviceStatus.PENDING_BIND
+    factory_device.station_id = station_id
+    factory_device.gateway_code = gateway_code
+    factory_device.bind_requested_by_user_id = current_user.id
+    factory_device.bind_requested_at = now
+    factory_device.last_seen_at = now
+    factory_device.gateway_device_id = gateway_device_id or factory_device.gateway_device_id
+    factory_device.gateway_serial = gateway_serial or factory_device.gateway_serial
+
+    await db.commit()
+    await db.refresh(token_row)
+    await db.refresh(factory_device)
+
+    await _record_security_audit(
+        db, 'gateway_provisioning_prepare',
+        None, None, '/api/v1/gateways/provisioning/prepare',
+        None, {
+            'gateway_factory_code': normalized_factory_code,
+            'gateway_code': gateway_code,
+            'token_id': token_row.token_id,
+            'created_by_user_id': current_user.id,
+        },
+    )
+
+    return {
+        'ok': True,
+        'server_base_url': settings.public_base_url,
+        'gateway_code': gateway_code,
+        'station_id': str(station_id),
+        'gateway_factory_code': normalized_factory_code,
+        'registration_token': plain_token,
+        'mqtt_host': settings.mqtt_host if settings.mqtt_enabled else None,
+        'mqtt_port': settings.mqtt_port if settings.mqtt_enabled else None,
+        'mqtt_tls_enabled': False,
+        'config_version': 1,
+        'expires_at': token_row.expires_at,
+    }
+
+
+async def confirm_gateway_provisioning(
+    db: AsyncSession,
+    gateway_factory_code: str,
+    gateway_code: str,
+    station_id: int,
+    current_user: User,
+) -> dict:
+    """Confirm gateway provisioning status. Does NOT return gateway_secret."""
+
+    # STAFF can only query own station
+    if current_user.role == UserRole.STAFF and current_user.station_id != station_id:
+        raise HTTPException(status_code=403, detail='You can only query gateways in your own station')
+
+    normalized_factory_code = gateway_factory_code.strip().upper()
+
+    factory_result = await db.execute(
+        select(GatewayFactoryDevice).where(GatewayFactoryDevice.gateway_factory_code == normalized_factory_code)
+    )
+    factory_device = factory_result.scalar_one_or_none()
+
+    gateway_result = await db.execute(
+        select(Gateway).where(Gateway.gateway_code == gateway_code, Gateway.station_id == station_id)
+    )
+    gateway = gateway_result.scalar_one_or_none()
+
+    await _record_security_audit(
+        db, 'gateway_provisioning_confirm',
+        None, None, '/api/v1/gateways/provisioning/confirm',
+        None, {
+            'gateway_factory_code': normalized_factory_code,
+            'gateway_code': gateway_code,
+            'station_id': station_id,
+            'queried_by_user_id': current_user.id,
+        },
+    )
+
+    if not factory_device:
+        return {
+            'ok': False,
+            'binding_status': 'UNKNOWN',
+            'message': 'Gateway factory code not found',
+        }
+
+    if not gateway:
+        return {
+            'ok': False,
+            'binding_status': factory_device.status.value,
+            'message': '网关尚未完成激活',
+        }
+
+    if gateway.status in ('ACTIVE', 'BOUND'):
+        return {
+            'ok': True,
+            'binding_status': 'BOUND',
+            'gateway_online': False,
+            'message': '网关已绑定，等待心跳',
+        }
+
+    if gateway.status == 'ONLINE':
+        return {
+            'ok': True,
+            'binding_status': 'ONLINE',
+            'gateway_online': True,
+            'gateway_code': gateway.gateway_code,
+            'station_id': str(gateway.station_id),
+            'gateway_factory_code': gateway.gateway_factory_code,
+            'last_seen_at': gateway.last_seen_at,
+            'message': '网关已绑定且在线',
+        }
+
+    return {
+        'ok': True,
+        'binding_status': gateway.status,
+        'message': f'网关状态: {gateway.status}',
+    }
 
 
 async def create_parcel(db: AsyncSession, data: dict, admin_id: int | None) -> Parcel:

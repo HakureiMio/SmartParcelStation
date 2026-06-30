@@ -2,16 +2,24 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.security import get_current_gateway, get_current_server_admin, get_current_server_admin_or_bootstrap, get_current_user_dev, verify_gateway_request
+from app.core.security import (
+    get_current_gateway,
+    get_current_server_admin,
+    get_current_server_admin_or_bootstrap,
+    get_current_staff_or_admin,
+    get_current_user,
+    get_current_user_dev,
+    verify_gateway_request,
+)
 from app.db.session import get_db
 from app.schemas.schemas import (
     AuthLoginIn,
     AuthPlaceholderIn,
     AuthPlaceholderOut,
     AuthSessionOut,
-    GatewayEventIn,
     GatewayBootstrapActivateIn,
     GatewayBootstrapActivateOut,
+    GatewayEventIn,
     GatewayHeartbeatIn,
     GatewayOut,
     GatewayRegistrationTokenCreate,
@@ -26,6 +34,10 @@ from app.schemas.schemas import (
     ParcelStatusPatch,
     PickupConfirmIn,
     PickupEventOut,
+    ProvisioningConfirmIn,
+    ProvisioningConfirmOut,
+    ProvisioningPrepareIn,
+    ProvisioningPrepareOut,
     StationCreate,
     StationOut,
     SyncPushItem,
@@ -59,7 +71,7 @@ async def auth_login(payload: AuthLoginIn, db: AsyncSession = Depends(get_db)):
 
 @router.post('/auth/register', response_model=AuthPlaceholderOut)
 async def auth_register(_: AuthPlaceholderIn):
-    return AuthPlaceholderOut(ok=False, message='注册功能暂未开放')
+    return AuthPlaceholderOut(ok=False, message='注册功能暂未开放，请联系站点管理员创建账号。')
 
 
 @router.post('/auth/forgot-password', response_model=AuthPlaceholderOut)
@@ -149,6 +161,7 @@ async def activate_gateway_registration(payload: GatewayBootstrapActivateIn, db:
         gateway_code=payload.gateway_code,
         station_id=payload.station_id,
         registration_token=payload.registration_token,
+        device_info=payload.device_info,
     )
     return GatewayBootstrapActivateOut(
         gateway_code=gateway.gateway_code,
@@ -187,6 +200,53 @@ async def gateway_heartbeat(
 @router.get('/gateways', response_model=list[GatewayOut])
 async def list_gateways(_: object = Depends(get_current_server_admin), db: AsyncSession = Depends(get_db)):
     return await services.list_gateways(db)
+
+
+@router.post('/gateways/provisioning/prepare', response_model=ProvisioningPrepareOut)
+async def provisioning_prepare(
+    payload: ProvisioningPrepareIn,
+    current_user=Depends(get_current_staff_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Prepare a gateway provisioning request.
+
+    Staff/admins submit a gateway_factory_code to get a short-lived
+    registration_token. The token is then written into the gateway device,
+    which calls /gateways/bootstrap/activate to complete binding.
+
+    Does NOT return gateway_secret — only the gateway receives it during activate.
+    """
+    result = await services.prepare_gateway_provisioning(
+        db,
+        gateway_factory_code=payload.gateway_factory_code,
+        station_id=payload.station_id,
+        requested_gateway_code=payload.requested_gateway_code,
+        gateway_device_id=payload.gateway_device_id,
+        gateway_serial=payload.gateway_serial,
+        current_user=current_user,
+    )
+    return ProvisioningPrepareOut(**result)
+
+
+@router.post('/gateways/provisioning/confirm', response_model=ProvisioningConfirmOut)
+async def provisioning_confirm(
+    payload: ProvisioningConfirmIn,
+    current_user=Depends(get_current_staff_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm gateway provisioning status.
+
+    Staff/admins can check whether a gateway factory device has completed
+    the bootstrap → activate → heartbeat chain. Does NOT return gateway_secret.
+    """
+    result = await services.confirm_gateway_provisioning(
+        db,
+        gateway_factory_code=payload.gateway_factory_code,
+        gateway_code=payload.gateway_code,
+        station_id=payload.station_id,
+        current_user=current_user,
+    )
+    return ProvisioningConfirmOut(**result)
 
 
 @router.get('/gateways/{gateway_code}/sync/pull', response_model=GatewaySyncPullOut)

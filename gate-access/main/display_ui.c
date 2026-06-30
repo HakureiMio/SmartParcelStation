@@ -14,6 +14,7 @@
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 static const char *TAG = "display_ui";
@@ -149,6 +150,21 @@ static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_dbi_io;
 static esp_ldo_channel_handle_t s_mipi_phy_ldo;
 static uint16_t *s_color_buffer;
+static SemaphoreHandle_t s_framebuffer_mutex;
+
+/* Five-pixel-wide, seven-pixel-high decimal digits. Each byte is one row. */
+static const uint8_t s_digit_font[10][7] = {
+    {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}, /* 0 */
+    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, /* 1 */
+    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, /* 2 */
+    {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E}, /* 3 */
+    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, /* 4 */
+    {0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E}, /* 5 */
+    {0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E}, /* 6 */
+    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, /* 7 */
+    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, /* 8 */
+    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E}, /* 9 */
+};
 
 static void show_text(const char *text)
 {
@@ -233,6 +249,69 @@ static void fill_color_buffer(uint16_t color)
     const size_t pixels = SPS_DISPLAY_WIDTH * SPS_DISPLAY_HEIGHT;
     for (size_t i = 0; i < pixels; i++) {
         s_color_buffer[i] = color;
+    }
+}
+
+static esp_err_t uid_hex_to_decimal(const char *hex, char *decimal, size_t decimal_size)
+{
+    uint8_t digits[32] = {0}; /* little-endian base-10 digits */
+    size_t digit_count = 1;
+
+    ESP_RETURN_ON_FALSE(hex != NULL && hex[0] != '\0' && decimal != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid UID");
+    for (const char *p = hex; *p != '\0'; ++p) {
+        unsigned nibble;
+        if (*p >= '0' && *p <= '9') {
+            nibble = (unsigned)(*p - '0');
+        } else if (*p >= 'A' && *p <= 'F') {
+            nibble = (unsigned)(*p - 'A' + 10);
+        } else if (*p >= 'a' && *p <= 'f') {
+            nibble = (unsigned)(*p - 'a' + 10);
+        } else {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        unsigned carry = nibble;
+        for (size_t i = 0; i < digit_count; ++i) {
+            unsigned value = (unsigned)digits[i] * 16U + carry;
+            digits[i] = (uint8_t)(value % 10U);
+            carry = value / 10U;
+        }
+        while (carry != 0) {
+            ESP_RETURN_ON_FALSE(digit_count < sizeof(digits), ESP_ERR_INVALID_SIZE,
+                                TAG, "UID decimal conversion overflow");
+            digits[digit_count++] = (uint8_t)(carry % 10U);
+            carry /= 10U;
+        }
+    }
+
+    ESP_RETURN_ON_FALSE(digit_count + 1 <= decimal_size, ESP_ERR_INVALID_SIZE,
+                        TAG, "UID decimal output buffer too small");
+    for (size_t i = 0; i < digit_count; ++i) {
+        decimal[i] = (char)('0' + digits[digit_count - 1 - i]);
+    }
+    decimal[digit_count] = '\0';
+    return ESP_OK;
+}
+
+static void draw_decimal_digit(char digit, int x, int y, int scale, uint16_t color)
+{
+    const uint8_t *glyph = s_digit_font[digit - '0'];
+    for (int row = 0; row < 7; ++row) {
+        for (int col = 0; col < 5; ++col) {
+            if ((glyph[row] & (1U << (4 - col))) == 0) {
+                continue;
+            }
+            for (int dy = 0; dy < scale; ++dy) {
+                int py = y + row * scale + dy;
+                for (int dx = 0; dx < scale; ++dx) {
+                    int px = x + col * scale + dx;
+                    if (px >= 0 && px < SPS_DISPLAY_WIDTH && py >= 0 && py < SPS_DISPLAY_HEIGHT) {
+                        s_color_buffer[py * SPS_DISPLAY_WIDTH + px] = color;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -381,6 +460,9 @@ esp_err_t display_ui_init(void)
         s_color_buffer = heap_caps_malloc(buffer_size, MALLOC_CAP_8BIT);
     }
     ESP_RETURN_ON_FALSE(s_color_buffer != NULL, ESP_ERR_NO_MEM, TAG, "allocate LCD color buffer failed");
+    s_framebuffer_mutex = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_framebuffer_mutex != NULL, ESP_ERR_NO_MEM, TAG,
+                        "create LCD framebuffer mutex failed");
     ESP_LOGI(TAG, "  Frame buffer allocated: addr=%p size=%u", (void *)s_color_buffer,
              (unsigned)buffer_size);
 
@@ -421,10 +503,12 @@ esp_err_t display_ui_fill_color(uint16_t rgb565, const char *name)
              (void *)s_color_buffer,
              (unsigned)(SPS_DISPLAY_WIDTH * SPS_DISPLAY_HEIGHT * sizeof(uint16_t)));
 
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
     fill_color_buffer(rgb565);
     esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0,
                                                SPS_DISPLAY_WIDTH, SPS_DISPLAY_HEIGHT,
                                                s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "draw done: color=%s (0x%04X) result=ESP_OK. "
                  "Reminder: ESP_OK means draw command sent; physical visibility depends on backlight + panel state.",
@@ -432,6 +516,51 @@ esp_err_t display_ui_fill_color(uint16_t rgb565, const char *name)
     } else {
         ESP_LOGE(TAG, "draw failed: color=%s (0x%04X) error=%s",
                  name == NULL ? "custom" : name, rgb565, esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t display_ui_show_card_id_numeric(const char *uid_hex)
+{
+    ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL && s_framebuffer_mutex != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "LCD is not initialized");
+
+    char decimal[32] = {0};
+    ESP_RETURN_ON_ERROR(uid_hex_to_decimal(uid_hex, decimal, sizeof(decimal)), TAG,
+                        "convert UID to decimal failed");
+
+    const int scale = 8;
+    const int glyph_advance = 6 * scale;
+    const int glyph_height = 7 * scale;
+    const int max_chars_per_line = SPS_DISPLAY_WIDTH / glyph_advance;
+    const int digit_count = (int)strlen(decimal);
+    const int line_count = (digit_count + max_chars_per_line - 1) / max_chars_per_line;
+    const int chars_per_line = (digit_count + line_count - 1) / line_count;
+    const int line_gap = 2 * scale;
+    const int block_height = line_count * glyph_height + (line_count - 1) * line_gap;
+    int source_index = 0;
+
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
+    fill_color_buffer(0xFFFF); /* White card-result screen. */
+    for (int line = 0; line < line_count; ++line) {
+        int remaining = digit_count - source_index;
+        int count = remaining < chars_per_line ? remaining : chars_per_line;
+        int line_width = count * glyph_advance - scale;
+        int x = (SPS_DISPLAY_WIDTH - line_width) / 2;
+        int y = (SPS_DISPLAY_HEIGHT - block_height) / 2 + line * (glyph_height + line_gap);
+        for (int i = 0; i < count; ++i) {
+            draw_decimal_digit(decimal[source_index++], x + i * glyph_advance, y, scale, 0x0000);
+        }
+    }
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0,
+                                               SPS_DISPLAY_WIDTH, SPS_DISPLAY_HEIGHT,
+                                               s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "CARD ID: %s", decimal);
+    } else {
+        ESP_LOGE(TAG, "draw card ID failed: %s", esp_err_to_name(err));
     }
     return err;
 }

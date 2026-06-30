@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import (
     EventSource,
+    GatewayFactoryDeviceStatus,
     GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
@@ -285,3 +286,69 @@ class GatewaySyncEventOut(ORMBase):
     retry_count: int
     created_at: datetime
     updated_at: datetime
+
+
+# ── Gateway Provisioning ──
+
+class ProvisioningPrepareIn(BaseModel):
+    gateway_factory_code: str
+    gateway_device_id: str | None = None
+    gateway_serial: str | None = None
+    station_id: int
+    requested_gateway_code: str | None = None
+
+
+class ProvisioningPrepareOut(BaseModel):
+    ok: bool = True
+    server_base_url: str
+    gateway_code: str
+    station_id: str
+    gateway_factory_code: str
+    registration_token: str
+    mqtt_host: str | None = None
+    mqtt_port: int | None = None
+    mqtt_tls_enabled: bool = False
+    config_version: int = 1
+    expires_at: datetime
+
+
+class ProvisioningConfirmIn(BaseModel):
+    gateway_factory_code: str
+    gateway_code: str
+    station_id: int
+
+
+class ProvisioningConfirmOut(BaseModel):
+    ok: bool
+    binding_status: str
+    gateway_online: bool | None = None
+    gateway_code: str | None = None
+    station_id: str | None = None
+    gateway_factory_code: str | None = None
+    last_seen_at: datetime | None = None
+    message: str
+
+
+class GatewayFactoryDeviceOut(ORMBase):
+    id: int
+    gateway_factory_code: str
+    gateway_device_id: str | None
+    gateway_serial: str | None
+    gateway_code: str | None
+    station_id: int | None
+    bound_gateway_id: int | None
+    status: GatewayFactoryDeviceStatus
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+    bind_requested_by_user_id: int | None
+    bind_requested_at: datetime | None
+    bound_at: datetime | None
+    disabled_reason: str | None
+    created_at: datetime
+
+
+class GatewayOutExtended(GatewayOut):
+    gateway_factory_code: str | None = None
+    gateway_device_id: str | None = None
+    gateway_serial: str | None = None
+    bound_at: datetime | None = None

@@ -16,6 +16,8 @@
 
 static const char *TAG = "sps_gate";
 
+#define SPS_STANDBY_COLOR_RGB565 0x07FF
+
 /* ── NVS init ───────────────────────────────────────────────── */
 
 static esp_err_t init_nvs(void)
@@ -55,12 +57,75 @@ static const demo_color_t s_color_cycle[] = {
     {0x0000, "black"},
 };
 
+#if SPS_DEMO_PN532_UID_TEST
+static void pn532_uid_test_task(void *arg)
+{
+    (void)arg;
+    char latched_uid[32] = {0};
+    bool card_latched = false;
+    unsigned consecutive_misses = 0;
+    unsigned poll_errors = 0;
+
+    ESP_LOGI(TAG, "=== PN532 continuous UID test ===");
+    ESP_LOGI(TAG, "Present a card at any time; no button or trigger is required");
+
+    while (true) {
+        esp_err_t err = pn532_reader_init();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "PN532 init failed: %s; retrying in 1 second", esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        ESP_LOGI(TAG, "PN532 ready; continuously polling ISO14443A cards every %dms",
+                 SPS_CARD_POLL_INTERVAL_MS);
+        while (true) {
+            char uid_hex[32] = {0};
+            bool card_present = false;
+            err = pn532_reader_poll_uid(uid_hex, sizeof(uid_hex), &card_present);
+            if (err != ESP_OK) {
+                if ((poll_errors++ % 10) == 0) {
+                    ESP_LOGW(TAG, "PN532 poll failed: %s", esp_err_to_name(err));
+                }
+                if (poll_errors >= 30) {
+                    ESP_LOGE(TAG, "PN532 has repeated communication errors; reinitializing");
+                    break;
+                }
+            } else {
+                poll_errors = 0;
+                if (card_present) {
+                    consecutive_misses = 0;
+                    if (!card_latched || strcmp(uid_hex, latched_uid) != 0) {
+                        strlcpy(latched_uid, uid_hex, sizeof(latched_uid));
+                        card_latched = true;
+                        ESP_LOGI(TAG, "CARD DETECTED: UID=%s (%u bytes)",
+                                 uid_hex, (unsigned)(strlen(uid_hex) / 2));
+                        esp_err_t draw_err = display_ui_show_card_id_numeric(uid_hex);
+                        if (draw_err != ESP_OK) {
+                            ESP_LOGE(TAG, "Display card ID failed: %s", esp_err_to_name(draw_err));
+                        }
+                    }
+                } else if (card_latched && ++consecutive_misses >= 3) {
+                    ESP_LOGI(TAG, "CARD REMOVED: UID=%s", latched_uid);
+                    display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (standby)");
+                    latched_uid[0] = '\0';
+                    card_latched = false;
+                    consecutive_misses = 0;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));
+        }
+    }
+}
+#endif
+
 static void run_display_first(void)
 {
     ESP_LOGI(TAG, "=== Display-first debug mode ===");
     ESP_LOGI(TAG, "SPS_DEMO_DISPLAY_FIRST=%d", SPS_DEMO_DISPLAY_FIRST);
     ESP_LOGI(TAG, "SPS_DEMO_FORCE_WHITE_SCREEN=%d", SPS_DEMO_FORCE_WHITE_SCREEN);
     ESP_LOGI(TAG, "SPS_DEMO_TOUCH_COLOR_TEST=%d", SPS_DEMO_TOUCH_COLOR_TEST);
+    ESP_LOGI(TAG, "SPS_DEMO_PN532_UID_TEST=%d", SPS_DEMO_PN532_UID_TEST);
 
     /* Step 1: Init touch + I2C scan FIRST (installs I2C driver on IO7/IO8).
      * Must run before display_ui_init() because display uses PCA9536 @ 0x41
@@ -86,6 +151,15 @@ static void run_display_first(void)
     if (probe_err != ESP_OK) {
         ESP_LOGW(TAG, "PCA9536 probe failed: %s", esp_err_to_name(probe_err));
     }
+
+#if SPS_DEMO_PN532_UID_TEST
+    ESP_LOGI(TAG, "--- Start PN532 continuous UID reader ---");
+    BaseType_t pn532_task_ok = xTaskCreate(pn532_uid_test_task, "pn532_uid_test", 4096,
+                                           NULL, 5, NULL);
+    if (pn532_task_ok != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create PN532 UID test task");
+    }
+#endif
 
 #if SPS_DEMO_WIFI_ENABLE
     /* Step 4: Init ESP8266 WiFi (UART1, GPIO43 TX, GPIO44 RX).
@@ -147,13 +221,13 @@ static void run_display_first(void)
     ESP_LOGI(TAG, "=== Touch dual-zone color switch ===");
     ESP_LOGI(TAG, "  Upper half (y < %d)  -> RED   (0xF800)", SPS_DISPLAY_HEIGHT / 2);
     ESP_LOGI(TAG, "  Lower half (y >= %d) -> BLUE  (0x001F)", SPS_DISPLAY_HEIGHT / 2);
-    ESP_LOGI(TAG, "  No touch             -> WHITE (0xFFFF)");
+    ESP_LOGI(TAG, "  No touch             -> BLUE-GREEN (0x07FF)");
 
     bool was_pressed = false;
     unsigned read_failures = 0;
 
-    /* Show initial white screen so user knows display is working */
-    display_ui_fill_color(0xFFFF, "WHITE (ready)");
+    /* Blue-green is the normal idle state. */
+    display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (standby)");
 
     while (true) {
         if (touch_available) {
@@ -180,9 +254,9 @@ static void run_display_first(void)
                              name,
                              esp_err_to_name(err));
                 } else if (!pressed && was_pressed) {
-                    /* Touch up: restore white */
-                    err = display_ui_fill_color(0xFFFF, "WHITE (restore)");
-                    ESP_LOGI(TAG, "TOUCH UP    x=%u y=%u -> restore WHITE draw=%s",
+                    /* Touch up: restore the blue-green standby screen. */
+                    err = display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (standby)");
+                    ESP_LOGI(TAG, "TOUCH UP    x=%u y=%u -> restore BLUE-GREEN draw=%s",
                              x, y, esp_err_to_name(err));
                 }
                 was_pressed = pressed;
@@ -190,7 +264,7 @@ static void run_display_first(void)
         } else {
             /* Touch not available — keep screen white so it's visible.
              * Don't leave it at the last cycle color (black). */
-            display_ui_fill_color(0xFFFF, "WHITE (no touch)");
+            display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (no touch)");
             vTaskDelay(pdMS_TO_TICKS(2000));
             ESP_LOGW(TAG, "Touch still unavailable; screen kept white. Check I2C bus.");
         }

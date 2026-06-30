@@ -1,10 +1,14 @@
+import base64
 import hashlib
 import hmac
+import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +57,83 @@ async def _record_security_audit(
             gateway_code or '-',
             reason or '-',
         )
+
+
+# ── Bearer Token (HMAC-SHA256) ──
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def _b64url_decode(s: str) -> bytes:
+    padding = 4 - len(s) % 4
+    if padding != 4:
+        s += '=' * padding
+    return base64.urlsafe_b64decode(s)
+
+
+def create_access_token(user_id: int, role: str, station_id: int | None) -> str:
+    """Create a stateless Bearer token: sps1.<base64url payload>.<hmac_signature>"""
+    settings = get_settings()
+    exp = int((datetime.now(timezone.utc) + timedelta(seconds=settings.auth_token_ttl_seconds)).timestamp())
+    payload = json.dumps({'user_id': user_id, 'role': role, 'station_id': station_id, 'exp': exp}, separators=(',', ':'))
+    encoded = _b64url_encode(payload.encode('utf-8'))
+    sig = hmac.new(settings.auth_token_secret.encode('utf-8'), encoded.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f'sps1.{encoded}.{sig}'
+
+
+def _verify_access_token_internal(token: str) -> dict | None:
+    """Verify token and return payload dict, or None."""
+    settings = get_settings()
+    try:
+        parts = token.split('.')
+        if len(parts) != 3 or parts[0] != 'sps1':
+            return None
+        _, encoded, sig = parts
+        expected_sig = hmac.new(settings.auth_token_secret.encode('utf-8'), encoded.encode('utf-8'), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, sig):
+            return None
+        payload = json.loads(_b64url_decode(encoded).decode('utf-8'))
+        now = int(time.time())
+        if payload.get('exp', 0) < now:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+async def _load_user_from_token(db: AsyncSession, token: str) -> User | None:
+    """Load User from a verified token payload."""
+    payload = _verify_access_token_internal(token)
+    if not payload:
+        return None
+    result = await db.execute(select(User).where(User.id == int(payload['user_id']), User.is_active.is_(True)))
+    return result.scalar_one_or_none()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Extract current user from Bearer token. Requires valid token."""
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Missing authorization token')
+    user = await _load_user_from_token(db, credentials.credentials)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid or expired token')
+    return user
+
+
+async def get_current_staff_or_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Require STAFF, GATEWAY_ADMIN, or SERVER_ADMIN role."""
+    if current_user.role not in {UserRole.STAFF, UserRole.GATEWAY_ADMIN, UserRole.SERVER_ADMIN}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Staff or admin role required')
+    return current_user
 
 
 async def get_current_user_dev(

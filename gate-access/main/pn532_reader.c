@@ -176,6 +176,22 @@ static void uid_to_hex(const uint8_t *uid, size_t uid_len, char *uid_hex, size_t
 
 esp_err_t pn532_reader_init(void)
 {
+    if (SPS_PN532_RST_GPIO != GPIO_NUM_NC) {
+        gpio_config_t reset_config = {
+            .pin_bit_mask = 1ULL << SPS_PN532_RST_GPIO,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        };
+        ESP_RETURN_ON_ERROR(gpio_config(&reset_config), TAG, "configure PN532 reset failed");
+        gpio_set_level(SPS_PN532_RST_GPIO, 0);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        gpio_set_level(SPS_PN532_RST_GPIO, 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "PN532 hardware reset complete: GPIO%d low 20ms -> high",
+                 SPS_PN532_RST_GPIO);
+    }
+
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = SPS_PN532_I2C_SDA_GPIO,
@@ -191,7 +207,9 @@ esp_err_t pn532_reader_init(void)
         s_i2c_driver_installed = true;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "PN532 I2C: port=%d SDA=GPIO%d SCL=GPIO%d addr=0x%02X freq=%dHz",
+             SPS_PN532_I2C_PORT, SPS_PN532_I2C_SDA_GPIO, SPS_PN532_I2C_SCL_GPIO,
+             SPS_PN532_I2C_ADDR, SPS_PN532_I2C_FREQ_HZ);
 
     uint8_t payload[16] = {0};
     size_t payload_len = 0;
@@ -199,6 +217,10 @@ esp_err_t pn532_reader_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PN532 firmware query failed: %s", esp_err_to_name(err));
         return err;
+    }
+    if (payload_len >= 4) {
+        ESP_LOGI(TAG, "PN532 firmware: IC=0x%02X Ver=%u.%u Support=0x%02X",
+                 payload[0], payload[1], payload[2], payload[3]);
     }
 
     uint8_t sam_args[] = {0x01, 0x14, 0x01};

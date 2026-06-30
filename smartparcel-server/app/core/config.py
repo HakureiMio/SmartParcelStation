@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     admin_bootstrap_token: str = 'change-me-local-only'
     public_base_url: str = 'https://example.com'
 
+    auth_token_secret: str = 'change-this-auth-token-secret'
+    auth_token_ttl_seconds: int = 86400
+
+    default_station_admin_username: str = 'station_admin001'
+    default_station_admin_password: str = '123456'
+    default_demo_user_username: str = 'demo_user001'
+    default_demo_user_password: str = '123456'
+
+    gateway_factory_code_pattern: str = r'^SPS-GW-[A-Z0-9-]{6,32}$'
+
     mqtt_enabled: bool = True
     mqtt_host: str = '127.0.0.1'
     mqtt_port: int = 1883

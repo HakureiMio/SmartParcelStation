@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.enums import (
     EventSource,
+    GatewayFactoryDeviceStatus,
     GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
@@ -60,9 +61,15 @@ class Gateway(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     gateway_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     station_id: Mapped[int] = mapped_column(ForeignKey('stations.id'), nullable=False)
+    # TODO: rename device_secret_hash to gateway_secret_encrypted or store encrypted secret.
+    # Currently stores gateway_secret plaintext used for HMAC verification.
     device_secret_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default='ACTIVE', nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gateway_factory_code: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    gateway_device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class GatewayNonce(Base):
@@ -90,6 +97,10 @@ class GatewayRegistrationToken(Base, TimestampMixin):
         Enum(GatewayRegistrationTokenStatus), default=GatewayRegistrationTokenStatus.PENDING, nullable=False
     )
     created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    gateway_factory_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    gateway_device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class Parcel(Base, TimestampMixin):
@@ -192,3 +203,30 @@ class SecurityAuditEvent(Base):
     reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     detail_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GatewayFactoryDevice(Base, TimestampMixin):
+    """Physical gateway device identified by unique factory code.
+
+    A factory code identifies a specific hardware unit. It is NOT a secret or credential.
+    Only gateways that complete bootstrap + HMAC heartbeat become trusted (ONLINE).
+    """
+
+    __tablename__ = 'gateway_factory_devices'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gateway_factory_code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    gateway_device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    station_id: Mapped[int | None] = mapped_column(ForeignKey('stations.id'), nullable=True)
+    bound_gateway_id: Mapped[int | None] = mapped_column(ForeignKey('gateways.id'), nullable=True)
+    status: Mapped[GatewayFactoryDeviceStatus] = mapped_column(
+        Enum(GatewayFactoryDeviceStatus), default=GatewayFactoryDeviceStatus.UNKNOWN_SEEN, nullable=False
+    )
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bind_requested_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    bind_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

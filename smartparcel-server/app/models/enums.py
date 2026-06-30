@@ -99,3 +99,12 @@ class NotificationStatus(str, Enum):
     SENT = 'SENT'
     READ = 'READ'
     FAILED = 'FAILED'
+
+
+class GatewayFactoryDeviceStatus(str, Enum):
+    UNKNOWN_SEEN = 'UNKNOWN_SEEN'
+    PENDING_BIND = 'PENDING_BIND'
+    BOUND = 'BOUND'
+    ONLINE = 'ONLINE'
+    DISABLED = 'DISABLED'
+    REVOKED = 'REVOKED'
