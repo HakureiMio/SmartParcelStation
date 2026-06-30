@@ -13,6 +13,17 @@
 static const char *TAG = "pn532";
 static bool s_uart_driver_installed;
 
+/*
+ * HSU wake preamble — must be sent before EVERY command when the PN532
+ * may have been idle.  The PN532 auto-baud detects from the 0x55 pattern
+ * and the following bytes (including the command frame itself) serve as
+ * dummy bytes to complete the baud-rate lock.
+ *
+ * libnfc uses 5 bytes (55 55 00 00 00); the Linux kernel driver uses
+ * 16 bytes (55 55 + 14×00).  Either works — we use 6 to keep overhead low.
+ */
+static const uint8_t PN532_WAKE[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00};
+
 #define PN532_PREAMBLE          0x00
 #define PN532_STARTCODE1        0x00
 #define PN532_STARTCODE2        0xFF
@@ -139,10 +150,22 @@ static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
     frame[6 + cmd_len] = checksum(&frame[5], len);
     frame[7 + cmd_len] = PN532_POSTAMBLE;
 
-    uart_flush_input(SPS_PN532_UART_PORT);
-    int written = uart_write_bytes(SPS_PN532_UART_PORT, frame, cmd_len + 8);
-    ESP_RETURN_ON_FALSE(written == (int)(cmd_len + 8), ESP_FAIL, TAG,
-                        "PN532 UART write failed: %d/%u", written, (unsigned)(cmd_len + 8));
+    /*
+     * Always prepend the HSU wake preamble.  Without it, PN532 will
+     * miss commands after even brief idle periods (< 100 ms).
+     * Do NOT flush between wake and command — the PN532 uses the
+     * command bytes as part of its baud-rate auto-detection.
+     *
+     * Continuous write:  wake (6 B) + frame (cmd_len+8 B)
+     */
+    size_t total = sizeof(PN532_WAKE) + cmd_len + 8;
+    uint8_t combined[sizeof(PN532_WAKE) + 80];
+    memcpy(combined, PN532_WAKE, sizeof(PN532_WAKE));
+    memcpy(combined + sizeof(PN532_WAKE), frame, cmd_len + 8);
+
+    int written = uart_write_bytes(SPS_PN532_UART_PORT, combined, total);
+    ESP_RETURN_ON_FALSE(written == (int)total, ESP_FAIL, TAG,
+                        "PN532 UART write failed: %d/%u", written, (unsigned)total);
     ESP_RETURN_ON_ERROR(uart_wait_tx_done(SPS_PN532_UART_PORT, pdMS_TO_TICKS(100)), TAG,
                         "PN532 UART TX timeout");
 
@@ -280,20 +303,8 @@ esp_err_t pn532_reader_init(void)
              SPS_PN532_UART_PORT, SPS_PN532_UART_TX_GPIO,
              SPS_PN532_UART_RX_GPIO, SPS_PN532_UART_BAUD);
 
-    /* Match the libnfc PN532 HSU driver used by the vendor test software:
-     * two 0x55 bytes followed by fourteen zero bytes. */
-    static const uint8_t wakeup[] = {
-        0x55, 0x55,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    };
-    uart_flush_input(SPS_PN532_UART_PORT);
-    int wake_written = uart_write_bytes(SPS_PN532_UART_PORT, wakeup, sizeof(wakeup));
-    ESP_RETURN_ON_FALSE(wake_written == sizeof(wakeup), ESP_FAIL, TAG,
-                        "PN532 wake-up write failed");
-    ESP_RETURN_ON_ERROR(uart_wait_tx_done(SPS_PN532_UART_PORT, pdMS_TO_TICKS(100)), TAG,
-                        "PN532 wake-up TX timeout");
-    vTaskDelay(pdMS_TO_TICKS(20));
+    /* Per-command wake is now prepended inside pn532_send_command().
+     * Just flush any stray RX bytes and send the first command. */
     uart_flush_input(SPS_PN532_UART_PORT);
 
     uint8_t payload[16] = {0};

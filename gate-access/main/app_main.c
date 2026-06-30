@@ -6,11 +6,13 @@
 #include "display_ui.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gateway_client.h"
 #include "network_client.h"
 #include "nvs_flash.h"
+#include "pn532_diag.h"
 #include "pn532_reader.h"
 #include "touch_test.h"
 
@@ -58,6 +60,13 @@ static const demo_color_t s_color_cycle[] = {
 };
 
 #if SPS_DEMO_PN532_UID_TEST
+/*
+ * Card latch timeout: after the last successful card read, the displayed
+ * UID stays visible for this many milliseconds before automatically
+ * returning to standby.  Touch events also reset the latch immediately.
+ */
+#define SPS_CARD_LATCH_TIMEOUT_MS  3000
+
 static void pn532_uid_test_task(void *arg)
 {
     (void)arg;
@@ -71,59 +80,86 @@ static void pn532_uid_test_task(void *arg)
     vTaskDelete(NULL);
 #else
     char latched_uid[32] = {0};
-    bool card_latched = false;
-    unsigned consecutive_misses = 0;
-    unsigned poll_errors = 0;
+    bool  card_latched = false;
+    int64_t last_read_us = 0;    /* timestamp of last successful card read */
+    unsigned poll_errors  = 0;
 
     ESP_LOGI(TAG, "=== PN532 continuous UID test ===");
-    ESP_LOGI(TAG, "Present a card at any time; no button or trigger is required");
+    ESP_LOGI(TAG, "Present a card at any time; UID auto-clears after %dms",
+             SPS_CARD_LATCH_TIMEOUT_MS);
+
+    /* One-time init */
+    esp_err_t err = pn532_reader_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PN532 init failed: %s; retrying", esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 
     while (true) {
-        esp_err_t err = pn532_reader_init();
+        /* Re-init if we got here via break from error recovery */
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "PN532 init failed: %s; retrying in 1 second", esp_err_to_name(err));
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            err = pn532_reader_init();
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "PN532 re-init failed: %s", esp_err_to_name(err));
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            ESP_LOGI(TAG, "PN532 re-initialized; polling ISO14443A every %dms",
+                     SPS_CARD_POLL_INTERVAL_MS);
+        }
+
+        char uid_hex[32] = {0};
+        bool card_present = false;
+        err = pn532_reader_poll_uid(uid_hex, sizeof(uid_hex), &card_present);
+
+        if (err == ESP_ERR_TIMEOUT) {
+            /* ACK or response timeout → treat as "no card" */
+            card_present = false;
+            poll_errors++;
+        } else if (err != ESP_OK) {
+            /* Hard error */
+            poll_errors++;
+            if ((poll_errors % 5) == 0) {
+                ESP_LOGW(TAG, "PN532 poll error: %s (count=%u)",
+                         esp_err_to_name(err), poll_errors);
+            }
+        } else {
+            poll_errors = 0;
+        }
+
+        if (card_present) {
+            last_read_us = esp_timer_get_time();
+            if (!card_latched || strcmp(uid_hex, latched_uid) != 0) {
+                strlcpy(latched_uid, uid_hex, sizeof(latched_uid));
+                card_latched = true;
+                ESP_LOGI(TAG, "CARD: UID=%s (%u bytes)",
+                         uid_hex, (unsigned)(strlen(uid_hex) / 2));
+                esp_err_t draw_err = display_ui_show_card_id_numeric(uid_hex);
+                if (draw_err != ESP_OK) {
+                    ESP_LOGE(TAG, "Display card ID failed: %s", esp_err_to_name(draw_err));
+                }
+            }
+        } else if (card_latched) {
+            /* Card was previously latched — check timeout */
+            int64_t elapsed_ms = (esp_timer_get_time() - last_read_us) / 1000;
+            if (elapsed_ms >= SPS_CARD_LATCH_TIMEOUT_MS) {
+                ESP_LOGI(TAG, "CARD TIMEOUT: UID=%s (absent for %lldms)",
+                         latched_uid, elapsed_ms);
+                display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (standby)");
+                latched_uid[0] = '\0';
+                card_latched = false;
+            }
+        }
+
+        /* Recovery: too many consecutive errors → re-init PN532 */
+        if (poll_errors >= 5) {
+            ESP_LOGW(TAG, "PN532 %u consecutive errors; reinitializing", poll_errors);
+            poll_errors = 0;
+            err = ESP_FAIL;  /* trigger re-init on next iteration */
             continue;
         }
 
-        ESP_LOGI(TAG, "PN532 ready; continuously polling ISO14443A cards every %dms",
-                 SPS_CARD_POLL_INTERVAL_MS);
-        while (true) {
-            char uid_hex[32] = {0};
-            bool card_present = false;
-            err = pn532_reader_poll_uid(uid_hex, sizeof(uid_hex), &card_present);
-            if (err != ESP_OK) {
-                if ((poll_errors++ % 10) == 0) {
-                    ESP_LOGW(TAG, "PN532 poll failed: %s", esp_err_to_name(err));
-                }
-                if (poll_errors >= 30) {
-                    ESP_LOGE(TAG, "PN532 has repeated communication errors; reinitializing");
-                    break;
-                }
-            } else {
-                poll_errors = 0;
-                if (card_present) {
-                    consecutive_misses = 0;
-                    if (!card_latched || strcmp(uid_hex, latched_uid) != 0) {
-                        strlcpy(latched_uid, uid_hex, sizeof(latched_uid));
-                        card_latched = true;
-                        ESP_LOGI(TAG, "CARD DETECTED: UID=%s (%u bytes)",
-                                 uid_hex, (unsigned)(strlen(uid_hex) / 2));
-                        esp_err_t draw_err = display_ui_show_card_id_numeric(uid_hex);
-                        if (draw_err != ESP_OK) {
-                            ESP_LOGE(TAG, "Display card ID failed: %s", esp_err_to_name(draw_err));
-                        }
-                    }
-                } else if (card_latched && ++consecutive_misses >= 3) {
-                    ESP_LOGI(TAG, "CARD REMOVED: UID=%s", latched_uid);
-                    display_ui_fill_color(SPS_STANDBY_COLOR_RGB565, "BLUE-GREEN (standby)");
-                    latched_uid[0] = '\0';
-                    card_latched = false;
-                    consecutive_misses = 0;
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));
-        }
+        vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));
     }
 #endif
 }
@@ -402,6 +438,16 @@ static void run_hardware_test(void)
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32P4 boot");
+
+#if SPS_DIAG_PN532_ONLY
+    ESP_LOGI(TAG, "=== PN532 DIAGNOSTIC MODE (SPS_DIAG_PN532_ONLY=1) ===");
+    ESP_LOGI(TAG, "All display/touch/WiFi/PN532 business logic is DISABLED.");
+    ESP_LOGI(TAG, "Only raw PN532 UART diagnostics will run.");
+    init_nvs(); /* NVS not used by diag, but avoids init warnings */
+    pn532_uart_diag_run();
+    return;
+#endif
+
     ESP_ERROR_CHECK(init_nvs());
 
 #if SPS_DEMO_DISPLAY_FIRST

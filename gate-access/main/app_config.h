@@ -11,21 +11,23 @@
 
 /* ── 调试开关 ───────────────────────────────────────────────────
  *
+ * SPS_DIAG_PN532_ONLY          独立 PN532 诊断（跳过 ESP8266/显示/触摸）
  * SPS_DEMO_DISPLAY_FIRST       优先调试屏幕
  * SPS_DEMO_TOUCH_COLOR_TEST    触摸点击切换颜色
- * SPS_DEMO_FORCE_WHITE_SCREEN  持续白屏，用于判断背光是否打开
- * SPS_DEMO_WIFI_ENABLE         在 display-first 模式下同时启动 ESP8266 WiFi
- * SPS_DEMO_PN532_UID_TEST      在 display-first 模式下持续读取并打印卡 UID
- *                              启用后：触摸 + 屏幕 + WiFi 联调
- *                              关闭后：仅触摸 + 屏幕
+ * SPS_DEMO_FORCE_WHITE_SCREEN  持续白屏
+ * SPS_DEMO_WIFI_ENABLE         在 display-first 模式下启动 ESP8266 WiFi
+ * SPS_DEMO_PN532_UID_TEST      在 display-first 模式下持续读取卡 UID
  * SPS_DEMO_ESP8266_OPEN_AP_TEST ESP8266 AT 测试（仅 SPS_DEMO_DISPLAY_FIRST=0 时有效）
  * SPS_ESP8266_CONNECT_ONLY_TEST ESP8266 连接 AP 测试（仅 SPS_DEMO_DISPLAY_FIRST=0 时有效）
  *
- * 默认：display-first + 触摸变色 + WiFi 联调
- *   - init_nvs → touch I2C → display → ESP8266 WiFi → 触摸变色循环
- *   - 不初始化 PN532 / gateway HTTP
- *   - ESP8266 失败不阻塞屏幕和触摸
+ * PN532 诊断模式（SPS_DIAG_PN532_ONLY=1）：
+ *   - 只初始化 UART2 + 逐步 PN532 诊断
+ *   - 不启动显示/触摸/ESP8266/PN532 业务逻辑
+ *   - 每步打印原始十六进制 TX/RX
+ *
+ * 默认：PN532 独立诊断
  */
+#define SPS_DIAG_PN532_ONLY             0
 #define SPS_DEMO_DISPLAY_FIRST          1
 #define SPS_DEMO_TOUCH_COLOR_TEST       1
 #define SPS_DEMO_FORCE_WHITE_SCREEN     0
@@ -82,7 +84,7 @@
 #define SPS_PN532_UART_BAUD         115200
 #define SPS_PN532_UART_BUF_SIZE     512
 #define SPS_PN532_UART_TIMEOUT_MS   1200
-#define SPS_PN532_UART_LOOPBACK_TEST 1
+#define SPS_PN532_UART_LOOPBACK_TEST 0
 #define SPS_PN532_USE_RESET         0
 #define SPS_PN532_RST_GPIO          GPIO_NUM_NC
 #define SPS_CARD_DEBOUNCE_MS        3000
