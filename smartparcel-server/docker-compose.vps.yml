@@ -25,8 +25,8 @@ services:
     env_file:
       - .env
     ports:
-      # 仅绑定本机，由 Nginx/Caddy 反代到公网
-      - "127.0.0.1:18000:8000"
+      # SERVER_BIND: 有域名/Nginx → 127.0.0.1；直接用IP → 0.0.0.0
+      - "${SERVER_BIND:-127.0.0.1}:18000:8000"
     depends_on:
       mysql:
         condition: service_healthy

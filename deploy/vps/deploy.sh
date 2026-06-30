@@ -89,6 +89,7 @@ fi
 
 # ---- 读取配置用于提示 ----
 PUBLIC_BASE_URL=$(grep -E '^PUBLIC_BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || echo "")
+SERVER_BIND=$(grep -E '^SERVER_BIND=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || echo "127.0.0.1")
 
 info ".env 已存在，开始部署..."
 
@@ -114,20 +115,35 @@ echo ""
 echo "============================================================"
 info "部署完成！"
 echo ""
-info "本机健康检查:"
-echo "  curl -fsS http://127.0.0.1:18000/api/v1/health"
-echo "  curl -fsS http://127.0.0.1:18000/api/v1/version"
+
+# 获取 VPS 公网 IP（用于无域名场景提示）
+VPS_IP=$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo "")
+
+if [ "$SERVER_BIND" = "0.0.0.0" ]; then
+    info "无域名直连模式（端口已绑定 0.0.0.0）:"
+    if [ -n "$VPS_IP" ]; then
+        echo "  curl -fsS http://${VPS_IP}:18000/api/v1/health"
+        echo "  curl -fsS http://${VPS_IP}:18000/api/v1/version"
+    else
+        echo "  curl -fsS http://<VPS-IP>:18000/api/v1/health"
+    fi
+    warn "注意: 确保防火墙已放行端口 18000:"
+    warn "  sudo ufw allow 18000/tcp"
+else
+    info "本机健康检查:"
+    echo "  curl -fsS http://127.0.0.1:18000/api/v1/health"
+    echo "  curl -fsS http://127.0.0.1:18000/api/v1/version"
+    echo ""
+    info "已绑定 127.0.0.1，请配置 Nginx/Caddy 反代到公网。"
+fi
+
 echo ""
 
 # 从 PUBLIC_BASE_URL 构建提示
-if [ -n "$PUBLIC_BASE_URL" ] && [ "$PUBLIC_BASE_URL" != "https://api.example.com" ]; then
-    info "公网地址:"
-    echo "  ${PUBLIC_BASE_URL}/api/v1/health"
-    echo "  ${PUBLIC_BASE_URL}/api/v1/version"
+if [ "$PUBLIC_BASE_URL" != "https://api.example.com" ]; then
+    info "PUBLIC_BASE_URL: $PUBLIC_BASE_URL"
 else
-    if [ "$PUBLIC_BASE_URL" = "https://api.example.com" ]; then
-        warn "PUBLIC_BASE_URL 仍为默认值，请在 .env 中修改为你的真实 HTTPS 域名。"
-    fi
+    warn "PUBLIC_BASE_URL 仍为默认值，请在 .env 中修改为你的真实地址。"
 fi
 
 echo ""
