@@ -1,0 +1,49 @@
+# SmartParcel Gateway — systemd service example
+#
+# Installation:
+#   1. Copy this file: sudo cp smartparcel-gateway.service.example /etc/systemd/system/smartparcel-gateway.service
+#   2. Edit the paths below to match your installation
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable smartparcel-gateway
+#   5. sudo systemctl start smartparcel-gateway
+#
+# Required permissions:
+#   - Bluetooth access (for BLE tag control)
+#   - NetworkManager control (for Wi-Fi hotspot provisioning)
+#   - See hotspot-permissions.md for NetworkManager setup
+
+[Unit]
+Description=SmartParcel Local Gateway
+After=network.target NetworkManager.service bluetooth.service
+Wants=network.target NetworkManager.service bluetooth.service
+
+[Service]
+Type=simple
+User=smartparcel
+Group=smartparcel
+WorkingDirectory=/opt/smartparcel-gateway
+Environment=PATH=/opt/smartparcel-gateway/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/smartparcel-gateway/.venv/bin/python -m gateway.main run
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening (adjust as needed)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/smartparcel-gateway/data
+ReadWritePaths=/opt/smartparcel-gateway/.env
+ReadWritePaths=/opt/smartparcel-gateway/.env.bak
+
+# Required for Bluetooth (BLE) and NetworkManager (hotspot)
+# The gateway needs:
+#   - Bluetooth adapter access for BLE tag control
+#   - NetworkManager D-Bus access for hotspot creation
+# These may require additional polkit rules or group memberships.
+# See hotspot-permissions.md for details.
+
+[Install]
+WantedBy=multi-user.target

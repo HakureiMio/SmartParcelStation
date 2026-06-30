@@ -266,3 +266,102 @@ class SyncQueue(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Gateway configuration and security models (binding, audit, session)
+# ---------------------------------------------------------------------------
+
+
+class GatewayBindingStatus(str, enum.Enum):
+    UNBOUND = "UNBOUND"
+    BINDING = "BINDING"
+    BOUND = "BOUND"
+    ONLINE = "ONLINE"
+    ERROR = "ERROR"
+
+
+class GatewayConfig(Base):
+    """Persistent gateway identity and binding state.
+
+    Secrets (gateway_secret) are never stored in this table.
+    The gateway_secret lives only in .env / in-memory Settings.
+    """
+
+    __tablename__ = "gateway_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gateway_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    gateway_device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gateway_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    station_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    server_base_url: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    mqtt_host: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    mqtt_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mqtt_tls_enabled: Mapped[bool] = mapped_column(default=False)
+    binding_status: Mapped[GatewayBindingStatus] = mapped_column(
+        Enum(GatewayBindingStatus), default=GatewayBindingStatus.UNBOUND
+    )
+    config_version: Mapped[int] = mapped_column(Integer, default=1)
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_heartbeat_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class GatewayBindingSession(Base):
+    """Tracks a single provisioning / binding handshake.
+
+    Only stores hash of pairing_code and one_time_binding_token.
+    """
+
+    __tablename__ = "gateway_binding_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    pairing_code_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    one_time_binding_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class GatewaySecurityAudit(Base):
+    """Local security audit log for network security demo.
+
+    Never stores secrets, plaintext tokens, or full sensitive request bodies.
+    credential_value / token are stored as SHA-256 hash only.
+    Audit write failures must not cause 500 on the main business path.
+    """
+
+    __tablename__ = "gateway_security_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    detail_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class LocalApiSession(Base):
+    """Local API bearer token sessions.
+
+    Only stores session_token_hash, never the plaintext token.
+    """
+
+    __tablename__ = "local_api_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(32), default="gateway-operator")
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

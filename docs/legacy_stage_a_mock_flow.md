@@ -2,7 +2,12 @@
 
 本文归档早期 `server + gateway + mock NFC/BLE` 软件闭环内容。该流程仍可用于演示和回归测试，但不再是当前 README 主线。
 
-当前主线见 `docs/tag_ble_gateway_flow.md`。
+> **Stage B 更新 (2026-06):** mock BLE / mock NFC 已从生产代码路径移除。mock 实现保存在
+> `smartparcel-gateway/gateway/legacy/` 仅供历史参考和测试之用。
+> 生产代码默认使用真实 BLE（`BLE_BACKEND=real`），不支持 mock fallback。
+
+当前主线见 `docs/gateway_provisioning_flow.md`（配网绑定流程）和
+`docs/tag_ble_gateway_flow.md`（BLE 标签管理流程）。
 
 ## 1. 阶段 A 定位
 
@@ -31,7 +36,10 @@ python -m alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload
 ```
 
-## 3. gateway 启动
+## 3. gateway 启动（阶段 A 方式，已废弃）
+
+> **注意：** 以下命令中的 `mock-nfc` 已从 CLI 中移除。`BLE_BACKEND=mock` 不再被接受。
+> 对于 Stage B，请使用 `python -m gateway.main run` 或 `python -m gateway.main provisioning`。
 
 ```powershell
 cd smartparcel-gateway
@@ -44,7 +52,7 @@ python -m gateway.main health
 python -m gateway.main heartbeat
 ```
 
-## 4. 模拟快递入站和同步
+## 4. 模拟快递入站和同步（保持不变）
 
 ```powershell
 python -m gateway.main inbound-parcel --parcel-code P20260602001 --receiver-phone 18800000002 --pickup-code 123456 --receiver-user-id 2 --receiver-name-masked "张*" --shelf-code A03
@@ -62,25 +70,34 @@ python -m gateway.main bind-tag --parcel-code P20260602001 --tag-id TAG001
 
 该流程属于旧 mock 标签业务，用于本地演示。真实 BLE 标签注册推荐使用 `/local/tags/register-from-ble`。
 
-## 6. mock NFC / 寻物
+## 6. mock NFC / 寻物（CLI 命令已移除）
+
+`mock-nfc` CLI 命令已在 Stage B 中移除。如需演示 NFC 流程，请使用真实 PN532 读卡器通过
+`gate-access` 硬件固件调用 `/local/gate/access-card` 接口。
 
 ```powershell
-python -m gateway.main register-nfc-credential --credential-type CARD_UID --credential-value CARD_UID_001 --user-id 2
-python -m gateway.main mock-nfc CARD_UID_001
-python -m gateway.main sync-push
+# 阶段 A 的方式（已不可用）：
+# python -m gateway.main mock-nfc CARD_UID_001
+
+# Stage B 方式：
+python -m gateway.main gate-access --card-uid CARD_UID_001
 ```
 
-gateway 本地认证通过后创建 `TAG_WAKE` task，并调用 mock BLE。server 只接收审计事件，不参与实时放行。
-
-## 7. 当前归档原因
+## 7. 归档原因
 
 阶段 A 仍有参考价值，但当前硬件主线已经切换为：
 
 ```text
 员工小程序 BLE 标签管理
   -> gateway local API
-  -> BLE_BACKEND=mock/real
-  -> nRF52810 GATT Service
+  -> BLE_BACKEND=real (bleak)
+  -> nRF52810 GATT Service (真实 BLE)
 ```
 
-因此旧 mock NFC 和门禁流程从根 README 中移出，避免读者误以为它仍是当前主线。
+mock 实现已移至 `smartparcel-gateway/gateway/legacy/`：
+
+| 原文件 | 归档位置 |
+|--------|---------|
+| `gateway/services/ble/mock.py` | `gateway/legacy/mock_ble_tag_service.py` |
+| `gateway/services/mock_ble_service.py` | `gateway/legacy/mock_ble_service.py` |
+| `gateway/services/mock_nfc_service.py` | `gateway/legacy/mock_nfc_service.py` |

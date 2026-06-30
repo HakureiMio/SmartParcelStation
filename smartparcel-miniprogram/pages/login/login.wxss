@@ -4,4 +4,4 @@
 .login-subtitle { margin: 14rpx 0 36rpx; color: #94a3b8; font-size: 26rpx; }
 .login-input { height: 92rpx; background: rgba(248,250,252,.95); border: 1rpx solid #e5e7eb; border-radius: 28rpx; padding: 0 26rpx; box-sizing: border-box; }
 .login-button { margin-top: 34rpx; height: 96rpx; min-height: 96rpx; }
-.demo-tip { margin-top: 28rpx; text-align: center; color: #94a3b8; font-size: 23rpx; line-height: 1.6; }
+

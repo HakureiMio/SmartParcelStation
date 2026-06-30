@@ -52,6 +52,12 @@ esp_err_t network_client_start(void)
         return err;
     }
 
+    err = esp8266_at_query_ip();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ESP8266 CIFSR failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
     s_network_ready = true;
     ESP_LOGI(TAG, "WiFi ready");
     return ESP_OK;

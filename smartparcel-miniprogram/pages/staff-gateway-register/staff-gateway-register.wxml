@@ -1,0 +1,288 @@
+<view class="page safe staff-page">
+  <view class="title">网关注册 / 初始化</view>
+  <view class="subtitle">{{stepTitle}}</view>
+
+  <!-- Progress bar -->
+  <view class="progress-bar">
+    <view class="progress-fill" style="width:{{step / totalSteps * 100}}%"></view>
+  </view>
+  <view class="progress-text">步骤 {{step}} / {{totalSteps}}</view>
+
+  <!-- Scenario selector (shown before Step 1) -->
+  <view class="glass-card scenario-card" wx:if="{{step === 1}}">
+    <view class="section-title">网络模式</view>
+    <view class="grid">
+      <view class="scenario-option {{scenario === 'A' ? 'active' : ''}}" data-scenario="A" bindtap="setScenario">
+        <view class="scenario-label">场景 A</view>
+        <view class="scenario-desc">网关热点可访问外网<br/>在同一页面完成全部流程</view>
+      </view>
+      <view class="scenario-option {{scenario === 'B' ? 'active' : ''}}" data-scenario="B" bindtap="setScenario">
+        <view class="scenario-label">场景 B</view>
+        <view class="scenario-desc">网关热点无外网<br/>先通过蜂窝网络获取参数<br/>再切换热点写入网关</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- Step 1: Check server -->
+  <view class="glass-card" wx:if="{{step === 1}}">
+    <view class="section-title">Step 1：服务器连接</view>
+    <view class="row">
+      <text class="label">员工</text>
+      <text class="value">{{staffSession.displayName || '已登录'}}</text>
+    </view>
+    <view class="row">
+      <text class="label">服务器</text>
+      <text class="value" style="color:{{serverOnline ? '#166534' : '#b91c1c'}}">
+        {{serverOnline ? '在线' : '未连接'}}
+      </text>
+    </view>
+    <button class="glass-button secondary-button" bindtap="_doStep1" loading="{{loading}}">重新检查</button>
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+  </view>
+
+  <!-- Step 2: Gateway info -->
+  <view class="glass-card" wx:if="{{step === 2}}">
+    <view class="section-title">Step 2：网关信息</view>
+    <view class="notice" style="margin-bottom:20rpx;">
+      请确认网关已上电且处于未绑定状态。网关热点通常为 SmartParcel-GW-XXXX。
+    </view>
+
+    <view class="form-label">网关序列号</view>
+    <input class="input" value="{{gatewaySerial}}" data-key="gatewaySerial" bindinput="inputField" placeholder="例如 SPS-GW-0001" />
+
+    <view class="form-label">网关设备 ID（可选）</view>
+    <input class="input" value="{{gatewayDeviceId}}" data-key="gatewayDeviceId" bindinput="inputField" placeholder="例如 GWDEV-xxxx" />
+
+    <view class="form-label">站点编号</view>
+    <input class="input" value="{{stationId}}" data-key="stationId" bindinput="inputField" placeholder="例如 1" />
+
+    <view class="form-label">期望网关编码（可选）</view>
+    <input class="input" value="{{requestedGatewayCode}}" data-key="requestedGatewayCode" bindinput="inputField" placeholder="例如 GW001" />
+
+    <view class="hint" style="margin-bottom:20rpx;">
+      💡 如果后续步骤已读取网关状态，可以点"自动填充"补全字段。
+    </view>
+
+    <button class="glass-button secondary-button" bindtap="fillFromStatus" wx:if="{{gatewayStatus}}">从网关状态自动填充</button>
+  </view>
+
+  <!-- Step 3: Request server binding params -->
+  <view class="glass-card" wx:if="{{step === 3}}">
+    <view class="section-title">Step 3：向服务器申请绑定参数</view>
+
+    <view wx:if="{{scenario === 'B'}}" class="notice" style="margin-bottom:20rpx;">
+      ⚠ 场景 B：请确保手机当前使用蜂窝网络或可访问服务器的 Wi-Fi，而非网关热点。
+    </view>
+
+    <view class="row">
+      <text class="label">序列号</text>
+      <text class="value">{{gatewaySerial || '未填写'}}</text>
+    </view>
+    <view class="row">
+      <text class="label">站点</text>
+      <text class="value">{{stationId || '未填写'}}</text>
+    </view>
+    <view class="row" wx:if="{{requestedGatewayCode}}">
+      <text class="label">编码</text>
+      <text class="value">{{requestedGatewayCode}}</text>
+    </view>
+
+    <button class="glass-button primary-button" bindtap="requestBindingParams" loading="{{loading}}">
+      申请绑定参数
+    </button>
+
+    <view class="success" wx:if="{{serverBindingParams}}">
+      服务器绑定参数已就绪：网关编码 {{serverBindingParams.gateway_code}}，站点 {{serverBindingParams.station_id}}
+    </view>
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+  </view>
+
+  <!-- Step 4: Connect to gateway hotspot -->
+  <view class="glass-card" wx:if="{{step === 4}}">
+    <view class="section-title">Step 4：连接网关热点</view>
+
+    <view class="notice" style="margin-bottom:20rpx;">
+      📶 请打开手机系统 Wi-Fi 设置，连接到网关热点。
+    </view>
+
+    <view class="row">
+      <text class="label">热点名称</text>
+      <text class="value" style="font-weight:800; font-size:30rpx;">
+        {{apSsid || 'SmartParcel-GW-XXXX'}}
+      </text>
+    </view>
+    <view class="row">
+      <text class="label">网关地址</text>
+      <text class="value">{{gatewayProvisioningBaseUrl}}</text>
+    </view>
+
+    <view class="hint" style="margin:20rpx 0;">
+      连接成功后，点击下方按钮继续。如无法自动检测连接状态，请人工确认。
+    </view>
+
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+  </view>
+
+  <!-- Step 5: Read gateway provisioning status -->
+  <view class="glass-card" wx:if="{{step === 5}}">
+    <view class="section-title">Step 5：读取网关本地状态</view>
+
+    <button class="glass-button primary-button" bindtap="readGatewayStatus" loading="{{loading}}">
+      读取网关状态
+    </button>
+
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+
+    <block wx:if="{{gatewayStatus}}">
+      <view class="row" style="margin-top:20rpx;">
+        <text class="label">绑定状态</text>
+        <text class="value" style="color:{{gatewayStatus.binding_status === 'UNBOUND' ? '#166534' : '#b45309'}}">
+          {{gatewayStatus.binding_status || '-'}}
+        </text>
+      </view>
+      <view class="row">
+        <text class="label">设备 ID</text>
+        <text class="value">{{gatewayStatus.gateway_device_id || '-'}}</text>
+      </view>
+      <view class="row">
+        <text class="label">序列号</text>
+        <text class="value">{{gatewayStatus.gateway_serial || '-'}}</text>
+      </view>
+      <view class="row">
+        <text class="label">热点 SSID</text>
+        <text class="value">{{gatewayStatus.ap_ssid || '-'}}</text>
+      </view>
+      <view class="row">
+        <text class="label">IP</text>
+        <text class="value">{{gatewayStatus.local_ip || '-'}}</text>
+      </view>
+    </block>
+
+    <view class="warn-notice" wx:if="{{gatewayStatus && gatewayStatus.binding_status === 'BOUND'}}">
+      ⚠ 网关当前已绑定。如需重新绑定，请确认后继续。
+    </view>
+  </view>
+
+  <!-- Step 6: Write binding params to gateway -->
+  <view class="glass-card" wx:if="{{step === 6}}">
+    <view class="section-title">Step 6：写入绑定参数到网关</view>
+
+    <view wx:if="{{!serverBindingParams}}" class="error" style="margin-bottom:20rpx;">
+      缺少服务器绑定参数，请返回 Step 3 完成申请。
+    </view>
+
+    <block wx:if="{{serverBindingParams}}">
+      <view class="row">
+        <text class="label">网关编码</text>
+        <text class="value">{{serverBindingParams.gateway_code}}</text>
+      </view>
+      <view class="row">
+        <text class="label">站点</text>
+        <text class="value">{{serverBindingParams.station_id}}</text>
+      </view>
+      <view class="row">
+        <text class="label">服务器地址</text>
+        <text class="value" style="font-size:22rpx; word-break:break-all;">{{serverBindingParams.server_base_url}}</text>
+      </view>
+
+      <button class="glass-button primary-button" bindtap="writeBindingParams" loading="{{loading}}"
+              disabled="{{!serverBindingParams}}">
+        写入绑定参数
+      </button>
+    </block>
+
+    <view class="success" wx:if="{{bindResult}}">绑定参数已成功写入网关。</view>
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+  </view>
+
+  <!-- Step 7: Poll verify -->
+  <view class="glass-card" wx:if="{{step === 7}}">
+    <view class="section-title">Step 7：等待网关握手</view>
+
+    <view class="notice" style="margin-bottom:20rpx;">
+      网关正在与服务器完成注册握手，请稍候...
+    </view>
+
+    <view wx:if="{{verifyPollCount > 0}}" class="row">
+      <text class="label">轮询次数</text>
+      <text class="value">{{verifyPollCount}}</text>
+    </view>
+    <view wx:if="{{verifyStatusText}}" class="row">
+      <text class="label">当前状态</text>
+      <text class="value" style="color:{{verifyStatusText.indexOf('失败') >= 0 ? '#b91c1c' : '#1d4ed8'}}">
+        {{verifyStatusText}}
+      </text>
+    </view>
+
+    <button class="glass-button primary-button" bindtap="pollVerify" loading="{{loading}}">
+      开始验证 / 重新轮询
+    </button>
+
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+
+    <!-- Error code hints -->
+    <view wx:if="{{verifyStatusText.indexOf('失败') >= 0}}" class="error" style="margin-top:16rpx;">
+      <view style="font-weight:700;">可能原因：</view>
+      <view>· SERVER_UNREACHABLE — 网关无法连接服务器</view>
+      <view>· REGISTRATION_TOKEN_EXPIRED — 注册令牌已过期</view>
+      <view>· GATEWAY_HEARTBEAT_FAILED — 心跳握手失败</view>
+      <view>· INVALID_GATEWAY_CODE — 网关编码无效</view>
+      <view>· STATION_MISMATCH — 站点不匹配</view>
+    </view>
+  </view>
+
+  <!-- Step 8: Complete -->
+  <view class="glass-card" wx:if="{{step === 8}}">
+    <view class="section-title" style="color:#166534;">✓ Step 8：绑定完成</view>
+
+    <view class="success" style="margin-bottom:20rpx;">
+      网关已成功绑定！本地会话已保存，可进入 BLE 标签管理等操作。
+    </view>
+
+    <view class="row">
+      <text class="label">网关编码</text>
+      <text class="value">{{serverBindingParams.gateway_code}}</text>
+    </view>
+    <view class="row">
+      <text class="label">站点</text>
+      <text class="value">{{serverBindingParams.station_id}}</text>
+    </view>
+    <view class="row">
+      <text class="label">会话过期</text>
+      <text class="value">{{localSessionExpiresAt || '短期会话'}}</text>
+    </view>
+
+    <button class="glass-button primary-button" bindtap="completeBinding" loading="{{loading}}" wx:if="{{!localSessionToken}}">
+      保存本地会话并完成
+    </button>
+    <button class="glass-button staff-button" bindtap="goGatewayStatus" wx:if="{{localSessionToken}}">
+      前往网关状态页
+    </button>
+  </view>
+
+  <!-- Navigation buttons -->
+  <view class="step-nav">
+    <button class="glass-button secondary-button" bindtap="prevStep" wx:if="{{step > 1}}" style="flex:1;">上一步</button>
+    <button class="glass-button primary-button" bindtap="nextStep" wx:if="{{step < 8 && step !== 1}}"
+            style="flex:1;"
+            disabled="{{(step === 3 && !serverBindingParams) || (step === 6 && !bindResult)}}">
+      下一步
+    </button>
+  </view>
+
+  <view class="step-nav" wx:if="{{step === 1}}">
+    <button class="glass-button primary-button" bindtap="nextStep" style="flex:1;"
+            disabled="{{!serverOnline && !staffSession}}">
+      开始注册流程
+    </button>
+  </view>
+
+  <!-- Warning: Scenario B — Step 3 done, need to switch to hotspot -->
+  <view class="notice" wx:if="{{scenario === 'B' && serverBindingParams && step === 3}}">
+    ✅ 服务器绑定参数已就绪。现在请切换到网关热点（Step 4），然后将参数写入网关。
+  </view>
+
+  <!-- Debug -->
+  <view class="debug-toggle" bindtap="toggleDebug">调试信息 {{debugOpen ? '收起' : '展开'}}</view>
+  <view class="debug-box" wx:if="{{debugOpen}}">{{debugText}}</view>
+</view>

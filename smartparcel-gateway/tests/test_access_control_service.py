@@ -18,7 +18,7 @@ from gateway.models.entities import (
     TaskType,
 )
 from gateway.services.access_control_service import AccessControlService
-from gateway.services.mock_ble_service import MockBleService
+from gateway.services.ble_service import BleService
 from gateway.services.server_client import ServerClient
 from gateway.services.sync_service import SyncService
 from gateway.services.task_service import TaskService
@@ -29,12 +29,25 @@ class DummyClient(ServerClient):
         return {"ok": True}
 
 
+class FakeBleService(BleService):
+    """Test double — returns OK for all BLE operations without hardware."""
+
+    def tag_wake(self, tag_id, led_color="BLUE", blink_pattern="SLOW", beep_pattern="SHORT_INTERVAL", duration_sec=30, pickup_session_id=None):
+        return {"tag_id": tag_id, "action": "TAG_WAKE", "result": "OK", "led_color": led_color, "duration_sec": duration_sec, "pickup_session_id": pickup_session_id}
+
+    def tag_stop(self, tag_id, pickup_session_id=None):
+        return {"tag_id": tag_id, "action": "TAG_STOP", "result": "OK", "pickup_session_id": pickup_session_id}
+
+    def tag_status_query(self, tag_id):
+        return {"tag_id": tag_id, "action": "TAG_STATUS_QUERY", "result": "OK", "battery_level": 80}
+
+
 def build_service(db, settings):
     return AccessControlService(
         db,
         SyncService(db, DummyClient(settings), settings.station_id),
         TaskService(db),
-        MockBleService(),
+        FakeBleService(),
         settings.station_id,
     )
 

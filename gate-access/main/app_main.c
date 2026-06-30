@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "app_config.h"
+#include "display_board_ctrl.h"
 #include "display_ui.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -11,8 +12,213 @@
 #include "network_client.h"
 #include "nvs_flash.h"
 #include "pn532_reader.h"
+#include "touch_test.h"
 
 static const char *TAG = "sps_gate";
+
+/* ── NVS init ───────────────────────────────────────────────── */
+
+static esp_err_t init_nvs(void)
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    return err;
+}
+
+/* ── Display-first debug mode ──────────────────────────────────
+ *
+ * When SPS_DEMO_DISPLAY_FIRST=1, app_main only does:
+ *   1. init_nvs
+ *   2. display_ui_init    (DSI + ST7701S + PCA9536 backlight/reset)
+ *   3. touch_test_init    (I2C scan IO7/IO8, 0x38 + 0x41 probe)
+ *   4. display_board_ctrl_probe_registers  (0x41 register dump)
+ *   5. Color cycle or white screen or touch color test
+ *
+ * No PN532, no ESP8266, no gateway HTTP.
+ */
+
+#if SPS_DEMO_DISPLAY_FIRST
+
+typedef struct {
+    uint16_t rgb565;
+    const char *name;
+} demo_color_t;
+
+static const demo_color_t s_color_cycle[] = {
+    {0xF800, "red"},
+    {0x07E0, "green"},
+    {0x001F, "blue"},
+    {0xFFFF, "white"},
+    {0x0000, "black"},
+};
+
+static void run_display_first(void)
+{
+    ESP_LOGI(TAG, "=== Display-first debug mode ===");
+    ESP_LOGI(TAG, "SPS_DEMO_DISPLAY_FIRST=%d", SPS_DEMO_DISPLAY_FIRST);
+    ESP_LOGI(TAG, "SPS_DEMO_FORCE_WHITE_SCREEN=%d", SPS_DEMO_FORCE_WHITE_SCREEN);
+    ESP_LOGI(TAG, "SPS_DEMO_TOUCH_COLOR_TEST=%d", SPS_DEMO_TOUCH_COLOR_TEST);
+
+    /* Step 1: Init touch + I2C scan FIRST (installs I2C driver on IO7/IO8).
+     * Must run before display_ui_init() because display uses PCA9536 @ 0x41
+     * on the same I2C bus. */
+    ESP_LOGI(TAG, "--- Init touch + I2C scan (installs I2C bus) ---");
+    esp_err_t touch_err = touch_test_init();
+    bool touch_available = (touch_err == ESP_OK);
+
+    /* Step 2: Init display (reuses I2C driver for PCA9536 backlight/reset + ST7701S) */
+    ESP_LOGI(TAG, "--- Init display ---");
+    ESP_ERROR_CHECK(display_ui_init());
+    display_ui_show_booting();
+    if (!touch_available) {
+        ESP_LOGW(TAG, "Touch unavailable: %s", esp_err_to_name(touch_err));
+        ESP_LOGW(TAG, "Check: CST826/CST816S power, PCA9536 TP_RST, I2C wiring");
+    } else {
+        ESP_LOGI(TAG, "Touch available at advertised address");
+    }
+
+    /* Step 3: Probe PCA9536 registers again for debug visibility */
+    ESP_LOGI(TAG, "--- PCA9536 @ 0x41 register probe ---");
+    esp_err_t probe_err = display_board_ctrl_probe_registers();
+    if (probe_err != ESP_OK) {
+        ESP_LOGW(TAG, "PCA9536 probe failed: %s", esp_err_to_name(probe_err));
+    }
+
+#if SPS_DEMO_WIFI_ENABLE
+    /* Step 4: Init ESP8266 WiFi (UART1, GPIO43 TX, GPIO44 RX).
+     * WiFi failure must NOT block display/touch — log and continue.
+     * Draw white first so the screen is visibly alive during connection. */
+    ESP_LOGI(TAG, "--- Init ESP8266 WiFi ---");
+    display_ui_fill_color(0xFFFF, "WHITE (WiFi init)");
+    ESP_LOGI(TAG, "ESP8266 UART: port=%d TX=GPIO%d RX=GPIO%d BAUD=%d",
+             SPS_ESP8266_UART_PORT,
+             SPS_ESP8266_UART_TX_GPIO,
+             SPS_ESP8266_UART_RX_GPIO,
+             SPS_ESP8266_UART_BAUD);
+    ESP_LOGI(TAG, "WiFi target: SSID=\"%s\"", SPS_WIFI_SSID);
+
+    esp_err_t wifi_err = network_client_start();
+    if (wifi_err == ESP_OK) {
+        ESP_LOGI(TAG, "ESP8266 WiFi connected — IP obtained");
+        display_ui_show_network_status("WiFi ready");
+        display_ui_fill_color(0x07E0, "GREEN (WiFi OK)");
+    } else {
+        ESP_LOGE(TAG, "ESP8266 WiFi init/connect failed: %s", esp_err_to_name(wifi_err));
+        ESP_LOGW(TAG, "Display and touch test will continue despite WiFi failure");
+        display_ui_show_network_status("WiFi FAIL");
+        display_ui_fill_color(0xF800, "RED (WiFi FAIL)");
+    }
+#endif /* SPS_DEMO_WIFI_ENABLE */
+
+#if SPS_DEMO_FORCE_WHITE_SCREEN
+    /* ── White screen test mode ──────────────────────────────
+     * Continuously draw white to verify backlight is on.
+     * If screen stays dark even with white drawn, backlight is off.
+     */
+    ESP_LOGI(TAG, "=== FORCE WHITE SCREEN mode ===");
+    ESP_LOGI(TAG, "Screen should show solid WHITE. If dark, backlight is OFF.");
+    while (true) {
+        esp_err_t err = display_ui_fill_color(0xFFFF, "white");
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "White screen draw failed: %s", esp_err_to_name(err));
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
+#elif SPS_DEMO_TOUCH_COLOR_TEST
+    /* ── Touch color test ────────────────────────────────────
+     * Touch upper half -> green, lower half -> blue.
+     * Also runs a one-time color cycle on startup.
+     */
+    ESP_LOGI(TAG, "=== Color cycle test (5 colors x 1s) ===");
+    for (size_t i = 0; i < sizeof(s_color_cycle) / sizeof(s_color_cycle[0]); i++) {
+        ESP_LOGI(TAG, "Cycle[%u/%u]: %s (0x%04X)",
+                 (unsigned)(i + 1),
+                 (unsigned)(sizeof(s_color_cycle) / sizeof(s_color_cycle[0])),
+                 s_color_cycle[i].name,
+                 s_color_cycle[i].rgb565);
+        display_ui_fill_color(s_color_cycle[i].rgb565, s_color_cycle[i].name);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    ESP_LOGI(TAG, "=== Touch dual-zone color switch ===");
+    ESP_LOGI(TAG, "  Upper half (y < %d)  -> RED   (0xF800)", SPS_DISPLAY_HEIGHT / 2);
+    ESP_LOGI(TAG, "  Lower half (y >= %d) -> BLUE  (0x001F)", SPS_DISPLAY_HEIGHT / 2);
+    ESP_LOGI(TAG, "  No touch             -> WHITE (0xFFFF)");
+
+    bool was_pressed = false;
+    unsigned read_failures = 0;
+
+    /* Show initial white screen so user knows display is working */
+    display_ui_fill_color(0xFFFF, "WHITE (ready)");
+
+    while (true) {
+        if (touch_available) {
+            bool pressed = false;
+            uint16_t x = 0;
+            uint16_t y = 0;
+            esp_err_t err = touch_test_read(&pressed, &x, &y);
+            if (err != ESP_OK) {
+                if ((read_failures++ % 50) == 0) {
+                    ESP_LOGW(TAG, "Touch read failed: %s", esp_err_to_name(err));
+                }
+            } else {
+                read_failures = 0;
+
+                if (pressed && !was_pressed) {
+                    /* Touch down: upper→red, lower→blue */
+                    bool upper_half = y < (SPS_DISPLAY_HEIGHT / 2);
+                    uint16_t color = upper_half ? 0xF800 : 0x001F;
+                    const char *name = upper_half ? "RED (upper)" : "BLUE (lower)";
+                    err = display_ui_fill_color(color, name);
+                    ESP_LOGI(TAG, "TOUCH DOWN  x=%u y=%u zone=%s color=%s draw=%s",
+                             x, y,
+                             upper_half ? "UPPER" : "LOWER",
+                             name,
+                             esp_err_to_name(err));
+                } else if (!pressed && was_pressed) {
+                    /* Touch up: restore white */
+                    err = display_ui_fill_color(0xFFFF, "WHITE (restore)");
+                    ESP_LOGI(TAG, "TOUCH UP    x=%u y=%u -> restore WHITE draw=%s",
+                             x, y, esp_err_to_name(err));
+                }
+                was_pressed = pressed;
+            }
+        } else {
+            /* Touch not available — keep screen white so it's visible.
+             * Don't leave it at the last cycle color (black). */
+            display_ui_fill_color(0xFFFF, "WHITE (no touch)");
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            ESP_LOGW(TAG, "Touch still unavailable; screen kept white. Check I2C bus.");
+        }
+        vTaskDelay(pdMS_TO_TICKS(SPS_TOUCH_POLL_INTERVAL_MS));
+    }
+
+#else
+    /* ── Color cycle only (no touch needed) ────────────────── */
+    ESP_LOGI(TAG, "=== Color cycle test (looping) ===");
+    while (true) {
+        for (size_t i = 0; i < sizeof(s_color_cycle) / sizeof(s_color_cycle[0]); i++) {
+            display_ui_fill_color(s_color_cycle[i].rgb565, s_color_cycle[i].name);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+#endif /* SPS_DEMO_FORCE_WHITE_SCREEN / SPS_DEMO_TOUCH_COLOR_TEST */
+}
+
+#endif /* SPS_DEMO_DISPLAY_FIRST */
+
+/* ── Normal gate flow ──────────────────────────────────────────
+ *
+ * Only reached when SPS_DEMO_DISPLAY_FIRST=0.
+ * Supports SPS_DEMO_TOUCH_COLOR_TEST and SPS_DEMO_ESP8266_OPEN_AP_TEST
+ * as before for independent bring-up.
+ */
+
+#if !SPS_DEMO_DISPLAY_FIRST
 
 static bool should_upload_uid(const char *uid, const char *last_uid, TickType_t *last_tick)
 {
@@ -27,26 +233,109 @@ static bool should_upload_uid(const char *uid, const char *last_uid, TickType_t 
     return true;
 }
 
-static esp_err_t init_nvs(void)
+#if SPS_DEMO_TOUCH_COLOR_TEST || SPS_DEMO_ESP8266_OPEN_AP_TEST || SPS_ESP8266_CONNECT_ONLY_TEST
+typedef struct {
+    uint16_t rgb565;
+    const char *name;
+} demo_color_t;
+
+static const demo_color_t s_demo_colors[] = {
+    {0x001F, "blue"},
+    {0x07E0, "green"},
+    {0x07FF, "blue-green"},
+};
+
+static void run_hardware_test(void)
 {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+    size_t color_index = 0;
+    esp_err_t draw_err = display_ui_fill_color(s_demo_colors[color_index].rgb565,
+                                                s_demo_colors[color_index].name);
+    if (draw_err != ESP_OK) {
+        ESP_LOGE(TAG, "Initial LCD color failed: %s", esp_err_to_name(draw_err));
     }
-    return err;
+
+    bool touch_available = false;
+#if SPS_DEMO_TOUCH_COLOR_TEST
+    esp_err_t touch_err = touch_test_init();
+    touch_available = touch_err == ESP_OK;
+    if (!touch_available) {
+        ESP_LOGW(TAG, "Touch unavailable; LCD and Wi-Fi tests continue: %s", esp_err_to_name(touch_err));
+    }
+#endif
+
+#if SPS_DEMO_ESP8266_OPEN_AP_TEST || SPS_ESP8266_CONNECT_ONLY_TEST
+    display_ui_show_network_status("ESP8266 init...");
+    ESP_LOGI(TAG, "ESP8266 test: UART=%d TX=GPIO%d RX=GPIO%d BAUD=%d",
+             SPS_ESP8266_UART_PORT,
+             SPS_ESP8266_UART_TX_GPIO,
+             SPS_ESP8266_UART_RX_GPIO,
+             SPS_ESP8266_UART_BAUD);
+    ESP_LOGI(TAG, "Wi-Fi connect-only test: SSID=%s, open AP=%s", SPS_WIFI_SSID,
+             SPS_WIFI_PASSWORD[0] == '\0' ? "yes" : "no");
+    esp_err_t net_err = network_client_start();
+    if (net_err == ESP_OK) {
+        display_ui_show_network_status("WIFI GOT IP");
+    } else {
+        ESP_LOGE(TAG, "ESP8266 test failed; touch test continues: %s", esp_err_to_name(net_err));
+    }
+#endif
+
+    bool was_pressed = false;
+    unsigned read_failures = 0;
+    while (true) {
+        if (touch_available) {
+            bool pressed = false;
+            uint16_t x = 0;
+            uint16_t y = 0;
+            esp_err_t err = touch_test_read(&pressed, &x, &y);
+            if (err != ESP_OK) {
+                if ((read_failures++ % 50) == 0) {
+                    ESP_LOGW(TAG, "Touch read failed: %s", esp_err_to_name(err));
+                }
+            } else {
+                read_failures = 0;
+                if (pressed && !was_pressed) {
+                    bool upper_half = y < (SPS_DISPLAY_HEIGHT / 2);
+                    color_index = upper_half ? 1 : 2;
+                    err = display_ui_fill_color(s_demo_colors[color_index].rgb565,
+                                                s_demo_colors[color_index].name);
+                    ESP_LOGI(TAG, "pressed x=%u y=%u region=%s color=%s draw=%s", x, y,
+                             upper_half ? "upper" : "lower", s_demo_colors[color_index].name,
+                             esp_err_to_name(err));
+                }
+                was_pressed = pressed;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(SPS_TOUCH_POLL_INTERVAL_MS));
+    }
 }
+#endif /* SPS_DEMO_TOUCH_COLOR_TEST || SPS_DEMO_ESP8266_OPEN_AP_TEST || SPS_ESP8266_CONNECT_ONLY_TEST */
+
+#endif /* !SPS_DEMO_DISPLAY_FIRST */
+
+/* ── app_main ────────────────────────────────────────────────── */
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32P4 boot");
     ESP_ERROR_CHECK(init_nvs());
 
+#if SPS_DEMO_DISPLAY_FIRST
+    run_display_first();
+    return;
+#else
+    /* ── Normal gate flow (SPS_DEMO_DISPLAY_FIRST=0) ───────── */
+
     ESP_ERROR_CHECK(display_ui_init());
     display_ui_show_booting();
 
+#if SPS_DEMO_TOUCH_COLOR_TEST || SPS_DEMO_ESP8266_OPEN_AP_TEST || SPS_ESP8266_CONNECT_ONLY_TEST
+    run_hardware_test();
+    return;
+#endif
+
     display_ui_show_network_status("ESP8266 init...");
-    display_ui_show_network_status("Connecting SPS_GATEWAY_AP...");
+    display_ui_show_network_status("Connecting...");
     esp_err_t net_err = network_client_start();
     if (net_err == ESP_OK) {
         display_ui_show_network_status("WiFi ready");
@@ -70,7 +359,7 @@ void app_main(void)
     while (true) {
         if (net_err != ESP_OK) {
             display_ui_show_network_status("ESP8266 init...");
-            display_ui_show_network_status("Connecting SPS_GATEWAY_AP...");
+            display_ui_show_network_status("Connecting...");
             net_err = network_client_start();
             if (net_err == ESP_OK) {
                 display_ui_show_network_status("WiFi ready");
@@ -124,4 +413,5 @@ void app_main(void)
 
         vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));
     }
+#endif /* !SPS_DEMO_DISPLAY_FIRST */
 }

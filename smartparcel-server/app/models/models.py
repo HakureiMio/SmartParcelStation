@@ -174,3 +174,21 @@ class Notification(Base, TimestampMixin):
     status: Mapped[NotificationStatus] = mapped_column(
         Enum(NotificationStatus), default=NotificationStatus.PENDING, nullable=False
     )
+
+
+class SecurityAuditEvent(Base):
+    """Lightweight security audit log for gateway auth failures and other security events.
+
+    Fields are deliberately kept minimal — no secrets, no full request bodies.
+    """
+
+    __tablename__ = 'security_audit_events'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    gateway_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    request_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    detail_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,12 +1,32 @@
 <view class="page safe staff-page">
   <view class="title">员工工作台</view>
   <view class="subtitle">入库、标签控制与现场处理</view>
+
   <view class="glass-card status-card">
-    <view class="row"><text class="label">当前员工</text><text class="value">{{displayName}}</text></view>
-    <view class="row"><text class="label">网关状态</text><text class="value">{{gateway}}</text></view>
+    <view class="row">
+      <text class="label">当前员工</text>
+      <text class="value">{{displayName}}</text>
+    </view>
+    <view class="row">
+      <text class="label">网关状态</text>
+      <text class="value gateway-status-{{gatewayStatusClass}}">{{gatewayStatus}}</text>
+    </view>
+    <view class="row" wx:if="{{!localSessionValid}}">
+      <text class="notice" style="margin-top:16rpx; display:block;">⚠ 网关尚未绑定或授权已过期，请先完成"网关注册 / 初始化"</text>
+    </view>
   </view>
+
+  <view class="section-title" style="margin-top:28rpx;">操作入口</view>
   <view class="action-grid">
-    <view class="work-card primary" data-page="staff-ble-tags" bindtap="go">
+    <view class="work-card primary" data-page="staff-gateway-register" bindtap="go">
+      <view class="work-title">网关注册 / 初始化</view>
+      <view class="work-sub">首次绑定新网关、检查热点配网状态、完成服务器握手</view>
+    </view>
+    <view class="work-card" data-page="gateway-status" bindtap="go">
+      <view class="work-title">网关状态</view>
+      <view class="work-sub">检查服务器与本地网关连接</view>
+    </view>
+    <view class="work-card" data-page="staff-ble-tags" bindtap="go">
       <view class="work-title">BLE 标签管理</view>
       <view class="work-sub">扫描、注册、连接、亮灯蜂鸣</view>
     </view>
@@ -22,10 +42,7 @@
       <view class="work-title">异常处理</view>
       <view class="work-sub">记录标签和现场异常</view>
     </view>
-    <view class="work-card" data-page="gateway-status" bindtap="go">
-      <view class="work-title">网关状态</view>
-      <view class="work-sub">检查服务器与本地网关</view>
-    </view>
   </view>
+
   <button class="glass-button secondary-button logout" bindtap="logout">退出登录</button>
 </view>

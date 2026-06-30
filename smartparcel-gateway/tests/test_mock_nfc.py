@@ -12,8 +12,8 @@ from gateway.models.entities import (
     ParcelStatus,
     TaskType,
 )
-from gateway.services.mock_ble_service import MockBleService
-from gateway.services.mock_nfc_service import MockNfcService
+from gateway.legacy.mock_ble_service import MockBleService
+from gateway.legacy.mock_nfc_service import MockNfcService
 from gateway.services.server_client import ServerClient
 from gateway.services.sync_service import SyncService
 from gateway.services.task_service import TaskService

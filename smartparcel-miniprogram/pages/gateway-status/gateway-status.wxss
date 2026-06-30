@@ -1,1 +1,3 @@
-
+.status-card { margin-top: 28rpx; }
+.status-card .row { margin: 18rpx 0; }
+.status-card .value { font-size: 28rpx; }

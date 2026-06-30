@@ -1,0 +1,25 @@
+# MySQL 8.0 低内存配置 — 适用于 1GB RAM VPS 演示环境
+# 配合 docker-compose.vps.yml 使用:
+#   volumes:
+#     - ./mysql.cnf:/etc/mysql/conf.d/lowmem.cnf:ro
+
+[mysqld]
+# 核心限制 — InnoDB buffer pool 是内存大户，默认 128M，这里压到 32M
+innodb_buffer_pool_size = 32M
+# 日志文件大小
+innodb_log_file_size = 16M
+# 限制并发连接
+max_connections = 20
+# 减少排序/join 缓冲
+sort_buffer_size = 256K
+join_buffer_size = 256K
+read_buffer_size = 128K
+read_rnd_buffer_size = 128K
+# 限制临时表
+tmp_table_size = 8M
+max_heap_table_size = 8M
+# 减少 table cache
+table_open_cache = 100
+table_definition_cache = 200
+# 关闭 performance schema（省 50-100M）
+performance_schema = OFF

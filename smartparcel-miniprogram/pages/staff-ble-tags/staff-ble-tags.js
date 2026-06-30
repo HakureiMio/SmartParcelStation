@@ -1,29 +1,42 @@
+/**
+ * BLE Tag Management page.
+ *
+ * All gateway operations require a valid local session token.
+ * If the session is missing or expired the page shows a prompt to
+ * complete gateway registration first.
+ *
+ * NO mock data. NO mock toast. NO MOCK:TAG addresses.
+ * All errors are real connectivity / auth / BLE errors.
+ */
 const gatewayApi = require('../../services/gateway-api')
 const authService = require('../../services/auth-service')
+const {
+  isLocalGatewaySessionValid
+} = require('../../services/local-session-service')
+const { redactSensitive } = require('../../services/security-utils')
 
 function unwrap(res) {
   return res && res.data ? res.data : res
 }
 
+/**
+ * Return human-readable source description.
+ * Only uses '真实网关', '未授权', '网关离线', 'BLE 不可用'.
+ */
 function sourceText(source) {
   if (source === 'real') return '真实网关'
-  if (source === 'mock') return 'Mock 演示'
-  return '错误'
-}
-
-function showResultToast(res, title) {
-  if (!res || res.ok === false) {
-    wx.showToast({ title: '请求失败', icon: 'error' })
-    return
-  }
-  wx.showToast({ title, icon: res.source === 'mock' ? 'none' : 'success' })
+  if (source === 'unauthorized') return '未授权'
+  if (source === 'offline') return '网关离线'
+  if (source === 'ble_unavailable') return 'BLE 不可用'
+  return '未知'
 }
 
 Page({
   data: {
+    localSessionValid: false,
     gatewayState: '检查中',
-    gatewaySource: 'error',
-    gatewaySourceText: '错误',
+    gatewaySource: '',
+    gatewaySourceText: '未知',
     lastError: '',
     scanning: false,
     loading: false,
@@ -31,13 +44,33 @@ Page({
     tags: [],
     selectedTag: null,
     detailOpen: false,
-    debugOpen: true,
+    debugOpen: false,
     debugText: ''
   },
 
   onLoad() {
     authService.requireRole('staff')
-    this.refreshAll()
+    this.checkAuthAndRefresh()
+  },
+
+  onShow() {
+    this.checkAuthAndRefresh()
+  },
+
+  checkAuthAndRefresh() {
+    const valid = isLocalGatewaySessionValid()
+    this.setData({ localSessionValid: valid })
+    if (valid) {
+      this.refreshAll()
+    } else {
+      this.setData({
+        gatewayState: '未授权 — 请先完成网关注册',
+        gatewaySource: 'unauthorized',
+        gatewaySourceText: '未授权',
+        tags: [],
+        scanItems: []
+      })
+    }
   },
 
   refreshAll() {
@@ -46,7 +79,10 @@ Page({
   },
 
   setDebug(res) {
-    this.setData({ debugText: JSON.stringify(res, null, 2) })
+    // SECURITY: redact sensitive fields before showing debug output.
+    this.setData({
+      debugText: JSON.stringify(redactSensitive(res), null, 2)
+    })
   },
 
   markError(message, res) {
@@ -58,11 +94,34 @@ Page({
     gatewayApi.getLocalHealth().then(res => {
       const data = unwrap(res)
       this.setDebug(res)
+      if (res.ok) {
+        this.setData({
+          gatewayState: '网关在线',
+          gatewaySource: 'real',
+          gatewaySourceText: sourceText('real'),
+          lastError: ''
+        })
+      } else if (res.error === 'LOCAL_SESSION_MISSING') {
+        this.setData({
+          gatewayState: '未授权',
+          gatewaySource: 'unauthorized',
+          gatewaySourceText: sourceText('unauthorized'),
+          lastError: '本地会话缺失或已过期'
+        })
+      } else {
+        this.setData({
+          gatewayState: '网关离线',
+          gatewaySource: 'offline',
+          gatewaySourceText: sourceText('offline'),
+          lastError: res.error || data.reason || 'local API 请求失败'
+        })
+      }
+    }).catch(err => {
       this.setData({
-        gatewayState: res.ok && res.source === 'real' ? '网关在线' : '网关不可用',
-        gatewaySource: res.source || 'error',
-        gatewaySourceText: sourceText(res.source),
-        lastError: res.ok ? '' : (res.error || data.reason || 'local API 请求失败')
+        gatewayState: '网关不可达',
+        gatewaySource: 'offline',
+        gatewaySourceText: sourceText('offline'),
+        lastError: (err && err.message) || '网络错误'
       })
     })
   },
@@ -70,17 +129,27 @@ Page({
   loadTags() {
     gatewayApi.listLocalTags().then(res => {
       const data = unwrap(res)
-      if (!res.ok || !data.ok) {
-        this.setData({ tags: [], lastError: res.error || data.detail || '标签列表读取失败' })
+      if (!res.ok) {
+        this.setData({
+          tags: [],
+          lastError: res.error === 'LOCAL_SESSION_MISSING'
+            ? '请先完成网关注册 / 授权'
+            : (res.error || data.detail || '标签列表读取失败')
+        })
         this.setDebug(res)
         return
       }
       this.setData({
         tags: data.items || [],
-        gatewaySource: res.source || this.data.gatewaySource,
-        gatewaySourceText: sourceText(res.source || this.data.gatewaySource)
+        gatewaySource: 'real',
+        gatewaySourceText: sourceText('real')
       })
       this.setDebug(res)
+    }).catch(err => {
+      this.setData({
+        tags: [],
+        lastError: (err && err.message) || '请求异常'
+      })
     })
   },
 
@@ -89,20 +158,26 @@ Page({
     gatewayApi.scanBleTags({ timeout_sec: 5 }).then(res => {
       const data = unwrap(res)
       this.setDebug(res)
-      if (!res.ok || !data.ok) {
-        this.setData({ scanItems: [], lastError: res.error || data.detail || '扫描失败' })
+      if (!res.ok) {
+        const errorMsg = res.error === 'LOCAL_SESSION_MISSING'
+          ? '请先完成网关注册 / 授权'
+          : (res.error || data.detail || '扫描失败')
+        this.setData({ scanItems: [], lastError: errorMsg })
         wx.showToast({ title: '扫描失败', icon: 'error' })
       } else {
         this.setData({
           scanItems: data.items || [],
-          gatewaySource: res.source || 'real',
-          gatewaySourceText: sourceText(res.source || 'real')
+          gatewaySource: 'real',
+          gatewaySourceText: sourceText('real')
         })
-        showResultToast(res, '扫描完成')
+        wx.showToast({ title: '扫描完成', icon: 'success' })
       }
       this.setData({ scanning: false })
     }).catch(err => {
-      this.setData({ scanning: false, lastError: err && err.message ? err.message : '扫描异常' })
+      this.setData({
+        scanning: false,
+        lastError: (err && err.message) || '扫描异常'
+      })
     })
   },
 
@@ -111,20 +186,30 @@ Page({
     const item = this.data.scanItems[index]
     if (!item) return
     this.setData({ loading: true, lastError: '' })
-    gatewayApi.registerTagFromBle({ ble_name: item.ble_name, ble_address: item.ble_address }).then(res => {
+    gatewayApi.registerTagFromBle({
+      ble_name: item.ble_name,
+      ble_address: item.ble_address
+    }).then(res => {
       const data = unwrap(res)
       this.setDebug(res)
-      if (!res.ok || !data.ok) {
-        this.setData({ lastError: res.error || data.detail || '注册失败' })
+      if (!res.ok) {
+        this.setData({
+          lastError: res.error === 'LOCAL_SESSION_MISSING'
+            ? '请先完成网关注册 / 授权'
+            : (res.error || data.detail || '注册失败')
+        })
         wx.showToast({ title: '注册失败', icon: 'error' })
       } else {
         this.setData({ selectedTag: data.item || null, detailOpen: true })
         this.loadTags()
-        showResultToast(res, '注册成功')
+        wx.showToast({ title: '注册成功', icon: 'success' })
       }
       this.setData({ loading: false })
     }).catch(err => {
-      this.setData({ loading: false, lastError: err && err.message ? err.message : '注册异常' })
+      this.setData({
+        loading: false,
+        lastError: (err && err.message) || '注册异常'
+      })
     })
   },
 
@@ -133,8 +218,12 @@ Page({
     gatewayApi.getLocalTag(tagId).then(res => {
       const data = unwrap(res)
       this.setDebug(res)
-      if (!res.ok || !data.ok) {
-        this.setData({ lastError: res.error || data.detail || '详情读取失败' })
+      if (!res.ok) {
+        this.setData({
+          lastError: res.error === 'LOCAL_SESSION_MISSING'
+            ? '请先完成网关注册 / 授权'
+            : (res.error || data.detail || '详情读取失败')
+        })
         return
       }
       this.setData({ selectedTag: data.item, detailOpen: true, lastError: '' })
@@ -153,8 +242,11 @@ Page({
     gatewayApi[method](tag.tag_id, payload).then(res => {
       const data = unwrap(res)
       this.setDebug(res)
-      if (!res.ok || !data.ok) {
-        this.setData({ lastError: res.error || data.detail || '操作失败' })
+      if (!res.ok) {
+        const errorMsg = res.error === 'LOCAL_SESSION_MISSING'
+          ? '请先完成网关注册 / 授权'
+          : (res.error || data.detail || '操作失败')
+        this.setData({ lastError: errorMsg })
         wx.showToast({ title: '操作失败', icon: 'error' })
       } else {
         const result = data.result || {}
@@ -166,14 +258,21 @@ Page({
           wx.showToast({ title: 'BLE 失败', icon: 'error' })
         } else {
           this.setData({ selectedTag: data.item || tag })
-          showResultToast(res, toastTitle)
+          wx.showToast({ title: toastTitle, icon: 'success' })
         }
         this.loadTags()
       }
       this.setData({ loading: false })
     }).catch(err => {
-      this.setData({ loading: false, lastError: err && err.message ? err.message : '操作异常' })
+      this.setData({
+        loading: false,
+        lastError: (err && err.message) || '操作异常'
+      })
     })
+  },
+
+  goRegister() {
+    wx.navigateTo({ url: '/pages/staff-gateway-register/staff-gateway-register' })
   },
 
   toggleDebug() {

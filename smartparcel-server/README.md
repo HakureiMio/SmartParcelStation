@@ -189,3 +189,106 @@ server 只接收标签异常摘要和取件审计。
 ```powershell
 docker compose down
 ```
+
+## 11. VPS 部署
+
+### 11.1 入口
+
+```bash
+bash deploy/vps/deploy.sh
+```
+
+详细说明请参考 [deploy/vps/README.md](../deploy/vps/README.md)。
+
+### 11.2 更新部署
+
+```bash
+bash deploy/vps/update.sh
+```
+
+### 11.3 健康检查
+
+```bash
+bash deploy/vps/healthcheck.sh
+```
+
+### 11.4 安全通信设计
+
+```
+┌─────────────────┐     HTTPS + HMAC      ┌──────────────────┐
+│  smartparcel-    │ ◄──────────────────► │  smartparcel-     │
+│  gateway         │   X-Gateway-* 请求头  │  server           │
+│  (本地网关)       │                      │  (VPS 中心服务器)  │
+└─────────────────┘                      └──────────────────┘
+                                                  ▲
+                                                  │ HTTPS + Token
+                                                  │
+                                         ┌────────┴────────┐
+                                         │  smartparcel-     │
+                                         │  miniprogram      │
+                                         │  (微信小程序)      │
+                                         └──────────────────┘
+```
+
+**小程序 → Server**: HTTPS + 认证凭证。小程序**不保存** gateway secret、server secret、数据库密码或微信 appsecret。
+
+**Gateway → Server**: HTTPS + HMAC-SHA256 + Timestamp + Nonce + Body SHA256。
+
+Server 端校验链：
+1. 检查所有必需请求头（`X-Gateway-Code`, `X-Gateway-Timestamp`, `X-Gateway-Nonce`, `X-Gateway-Body-SHA256`, `X-Gateway-Signature`）
+2. 查找 gateway 并验证状态
+3. 校验 timestamp 在容差范围内（防过期请求）
+4. 校验 body SHA256（防篡改）
+5. 校验 HMAC-SHA256 签名（防伪造）
+6. 校验 nonce 未被使用过（防重放）
+
+### 11.5 网络安全演示
+
+演示脚本位于 `scripts/security_demo/`：
+
+| 脚本 | 预期结果 |
+|------|----------|
+| `valid_gateway_request.py` | 200 OK |
+| `tampered_body_request.py` | 401 Invalid gateway body hash |
+| `replay_nonce_request.py` | 401 Replay gateway nonce |
+| `invalid_signature_request.py` | 401 Invalid gateway signature |
+
+运行方式：
+
+```bash
+export SERVER_BASE_URL=http://127.0.0.1:18000
+export GATEWAY_CODE=GW-DEV-001
+export GATEWAY_SECRET=<secret>
+python scripts/security_demo/valid_gateway_request.py
+```
+
+详细说明：[scripts/security_demo/README.md](scripts/security_demo/README.md)
+
+### 11.6 端口暴露建议
+
+| 端口 | 服务 | 公网 |
+|------|------|------|
+| 80/443 | Nginx / Caddy | ✅ 开放 |
+| 18000 | Server API | ❌ 仅本机 |
+| 3306 | MySQL | ❌ 仅本机 |
+| 1883 | MQTT | ❌ 仅本机 |
+| 18083 | EMQX Dashboard | ❌ 仅本机 |
+| 8080 | phpMyAdmin | ❌ 默认禁用 |
+
+### 11.7 VPS 服务管理
+
+```bash
+cd smartparcel-server
+
+# 查看容器状态
+docker compose -f docker-compose.vps.yml ps
+
+# 查看日志
+docker compose -f docker-compose.vps.yml logs -f server
+
+# 停止服务
+docker compose -f docker-compose.vps.yml down
+
+# 重启服务
+docker compose -f docker-compose.vps.yml up -d --build
+```

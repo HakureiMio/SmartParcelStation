@@ -1,0 +1,98 @@
+# =============================================================================
+# SmartParcel Server - VPS 部署 Compose 文件
+# =============================================================================
+# 使用说明：
+#   此文件用于 VPS 生产/演示环境。
+#   本地开发请使用 docker-compose.yml。
+#
+#   首次部署：
+#     cp .env.vps.example .env
+#     # 编辑 .env 修改密码和域名
+#     docker compose -f docker-compose.vps.yml up -d --build
+#
+#   数据持久化：
+#     MySQL 数据保存在 Docker volume 中，即使容器移除数据也不会丢失。
+#     升级前建议备份数据。
+# =============================================================================
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartparcel-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # 仅绑定本机，由 Nginx/Caddy 反代到公网
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+    # 启动时先执行数据库迁移，再启动 uvicorn
+    command: >
+      sh -c "python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mysql:
+    image: mysql:8.0
+    container_name: smartparcel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      # 仅绑定本机，不暴露公网
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql.cnf:/etc/mysql/conf.d/lowmem.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  emqx:
+    image: emqx/emqx:5.8.4
+    container_name: smartparcel-emqx
+    restart: unless-stopped
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USERNAME:-admin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-public}
+    ports:
+      # MQTT - 仅绑定本机
+      - "127.0.0.1:1883:1883"
+      # EMQX Dashboard - 仅绑定本机
+      - "127.0.0.1:18083:18083"
+
+  # phpMyAdmin - 仅调试用，默认不启动
+  # 启动方式: docker compose -f docker-compose.vps.yml --profile debug up -d phpmyadmin
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: smartparcel-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      # 仅绑定本机，不暴露公网
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - mysql
+    profiles:
+      - debug
+
+volumes:
+  mysql_data:

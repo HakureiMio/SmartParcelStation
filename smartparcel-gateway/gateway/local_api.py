@@ -1,27 +1,37 @@
+"""
+SmartParcel Gateway Local API.
+
+Provides:
+- /local/health           — always available
+- /local/gate/access-card — gate access control (requires local auth when bound)
+- /local/tags/*           — BLE tag management (requires local auth when bound)
+- /local/provisioning/*   — served by provisioning_api when unbound
+
+Authentication:
+- When BINDING_STATUS=UNBOUND, only /local/health and /local/provisioning/* are open.
+- When BOUND, business endpoints require Authorization: Bearer <local_session_token>.
+"""
+
 from __future__ import annotations
 
 import re
 from datetime import datetime
 
-from fastapi import FastAPI
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
-from sqlalchemy import or_
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from gateway.core.config import get_settings
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
-from gateway.models.entities import LocalTag
-from gateway.models.entities import TagStatus
+from gateway.local_api_auth import validate_local_session
+from gateway.models.entities import LocalTag, TagStatus
 from gateway.services.access_control_service import AccessControlService
 from gateway.services.ble import get_ble_tag_service
-from gateway.services.mock_ble_service import MockBleService
+from gateway.services.ble.adapter import RealBleCommandService
 from gateway.services.server_client import ServerClient
 from gateway.services.sync_service import SyncService
 from gateway.services.task_service import TaskService
-
 
 app = FastAPI(title="SmartParcel Gateway Local API")
 FACTORY_BLE_NAME_RE = re.compile(r"^SPS-[A-Z0-9]{2,8}-[0-9]{8}-[0-9]{4,8}$")
@@ -31,6 +41,11 @@ LEGACY_BLE_NAME_RE = re.compile(r"^SPS-TAG-[0-9A-Fa-f]{4,8}$")
 @app.on_event("startup")
 def ensure_local_database_schema() -> None:
     init_db()
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
 
 class GateAccessIn(BaseModel):
@@ -51,6 +66,11 @@ class RegisterFromBleIn(BaseModel):
 class WakeTagIn(BaseModel):
     color: str = "BLUE"
     duration_sec: int = 30
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _now() -> datetime:
@@ -129,26 +149,46 @@ def _apply_ble_result(tag: LocalTag, result: dict, success_status: TagStatus | N
     tag.last_error_at = _now()
 
 
+# ---------------------------------------------------------------------------
+# Public endpoint (always available)
+# ---------------------------------------------------------------------------
+
+
 @app.get("/local/health")
 def local_health():
     settings = get_settings()
     return {
         "status": "ok",
-        "gateway_code": settings.gateway_code,
-        "station_id": str(settings.station_id),
+        "gateway_code": settings.gateway_code or None,
+        "station_id": settings.station_id or None,
+        "binding_status": settings.binding_status.upper(),
     }
 
 
+# ---------------------------------------------------------------------------
+# Authenticated endpoints (require Bearer token when BOUND)
+# ---------------------------------------------------------------------------
+
+
 @app.post("/local/gate/access-card")
-def gate_access_card(payload: GateAccessIn):
+def gate_access_card(
+    payload: GateAccessIn,
+    auth: dict = Depends(validate_local_session),
+):
     settings = get_settings()
     db = SessionLocal()
     try:
+
+        def _lookup_ble_address(tag_id: str) -> str | None:
+            tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+            return tag.ble_address if tag else None
+
+        ble_service = RealBleCommandService(address_lookup=_lookup_ble_address)
         service = AccessControlService(
             db,
             SyncService(db, ServerClient(settings), settings.station_id),
             TaskService(db),
-            MockBleService(),
+            ble_service,
             settings.station_id,
         )
         return service.handle_access_card(
@@ -161,7 +201,10 @@ def gate_access_card(payload: GateAccessIn):
 
 
 @app.post("/local/tags/scan")
-async def scan_tags(payload: ScanTagsIn):
+async def scan_tags(
+    payload: ScanTagsIn,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         items = await get_ble_tag_service().scan_tags(payload.timeout_sec)
@@ -209,7 +252,10 @@ async def scan_tags(payload: ScanTagsIn):
 
 
 @app.post("/local/tags/register-from-ble")
-def register_from_ble(payload: RegisterFromBleIn):
+def register_from_ble(
+    payload: RegisterFromBleIn,
+    auth: dict = Depends(validate_local_session),
+):
     ble_name = payload.ble_name.strip()
     ble_address = payload.ble_address.strip()
     if not _is_valid_ble_name(ble_name):
@@ -260,7 +306,9 @@ def register_from_ble(payload: RegisterFromBleIn):
 
 
 @app.get("/local/tags")
-def list_tags():
+def list_tags(
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         items = list(db.scalars(select(LocalTag).order_by(LocalTag.local_no.asc(), LocalTag.created_at.desc())))
@@ -270,7 +318,10 @@ def list_tags():
 
 
 @app.get("/local/tags/{tag_id}")
-def get_tag(tag_id: str):
+def get_tag(
+    tag_id: str,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         return {"ok": True, "item": _tag_detail(_find_tag(db, tag_id))}
@@ -279,7 +330,10 @@ def get_tag(tag_id: str):
 
 
 @app.post("/local/tags/{tag_id}/connect")
-async def connect_tag(tag_id: str):
+async def connect_tag(
+    tag_id: str,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         tag = _find_tag(db, tag_id)
@@ -296,7 +350,11 @@ async def connect_tag(tag_id: str):
 
 
 @app.post("/local/tags/{tag_id}/wake")
-async def wake_tag(tag_id: str, payload: WakeTagIn):
+async def wake_tag(
+    tag_id: str,
+    payload: WakeTagIn,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         tag = _find_tag(db, tag_id)
@@ -309,7 +367,10 @@ async def wake_tag(tag_id: str, payload: WakeTagIn):
 
 
 @app.post("/local/tags/{tag_id}/stop")
-async def stop_tag(tag_id: str):
+async def stop_tag(
+    tag_id: str,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         tag = _find_tag(db, tag_id)
@@ -322,7 +383,10 @@ async def stop_tag(tag_id: str):
 
 
 @app.get("/local/tags/{tag_id}/status")
-async def read_tag_status(tag_id: str):
+async def read_tag_status(
+    tag_id: str,
+    auth: dict = Depends(validate_local_session),
+):
     db = SessionLocal()
     try:
         tag = _find_tag(db, tag_id)

@@ -6,6 +6,8 @@ idf_component_register(
         "network_esp8266_at.c"
         "gateway_client.c"
         "display_ui.c"
+        "display_board_ctrl.c"
+        "touch_test.c"
     INCLUDE_DIRS "."
     REQUIRES
         driver

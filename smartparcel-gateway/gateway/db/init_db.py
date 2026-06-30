@@ -7,6 +7,7 @@ from sqlalchemy import text
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        # --- local_parcels migrations ---
         parcel_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(local_parcels)"))}
         parcel_additions = {
             "receiver_name_masked": "ALTER TABLE local_parcels ADD COLUMN receiver_name_masked VARCHAR(128)",
@@ -18,6 +19,7 @@ def init_db() -> None:
             if column not in parcel_columns:
                 conn.execute(text(statement))
 
+        # --- local_tags migrations ---
         tag_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(local_tags)"))}
         tag_additions = {
             "tag_uid": "ALTER TABLE local_tags ADD COLUMN tag_uid VARCHAR(128)",
@@ -38,6 +40,7 @@ def init_db() -> None:
             if column not in tag_columns:
                 conn.execute(text(statement))
 
+        # --- local_parcel_tag_bindings migrations ---
         binding_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(local_parcel_tag_bindings)"))}
         binding_additions = {
             "released_at": "ALTER TABLE local_parcel_tag_bindings ADD COLUMN released_at DATETIME",
@@ -49,6 +52,23 @@ def init_db() -> None:
         for column, statement in binding_additions.items():
             if column not in binding_columns:
                 conn.execute(text(statement))
+
+        # --- gateway_config migrations (future-proof) ---
+        existing_tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "gateway_config" in existing_tables:
+            config_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(gateway_config)"))}
+            config_additions: dict[str, str] = {}
+            for column, statement in config_additions.items():
+                if column not in config_columns:
+                    conn.execute(text(statement))
+
+        # --- gateway_security_audit migrations (future-proof) ---
+        if "gateway_security_audit" in existing_tables:
+            audit_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(gateway_security_audit)"))}
+            audit_additions: dict[str, str] = {}
+            for column, statement in audit_additions.items():
+                if column not in audit_columns:
+                    conn.execute(text(statement))
 
 
 if __name__ == "__main__":

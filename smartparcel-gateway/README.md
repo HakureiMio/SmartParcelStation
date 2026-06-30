@@ -1,123 +1,126 @@
 # SmartParcel Gateway
 
+SmartParcel 站点本地网关 —— 负责 BLE 标签控制、本地 SQLite 缓存、
+server 同步、门禁认证和员工小程序本地 API。
+
 ## 1. 网关职责
 
-`smartparcel-gateway` 是站点本地网关项目，负责局域网内的本地业务、SQLite 缓存、标签主数据和 BLE 控制。它是智能寻物标签的本地主数据中心，不是中心账号系统。
+- 本地 SQLite 数据库（标签主数据、包裹缓存、审计日志）
+- 真实 BLE 标签扫描、连接、唤醒、停止和状态读取（`bleak`）
+- 本地取件认证和门禁读卡
+- 与 `smartparcel-server` 的 HMAC-SHA256 签名通信（heartbeat、sync-push、sync-pull）
+- 开机热点配网和 provisioning API
+- 本地 API 安全认证（Bearer token + 防重放）
 
-gateway 当前负责：
+## 2. 部署流程
 
-- 本地 SQLite 数据库。
-- 标签注册、标签本地编号和员工端显示名。
-- BLE 标签扫描、连接、唤醒、停止和状态读取。
-- 本地取件认证、mock NFC 和门禁读卡原型。
-- 与 `smartparcel-server` 的 `sync-push` / `sync-pull`。
-- HMAC 网关签名、heartbeat 和同步审计。
+### 2.1 安装
 
-## 2. 当前推荐闭环：员工小程序控制 BLE 标签
-
-当前推荐验证闭环是：
-
-```text
-smartparcel-miniprogram 员工端 BLE 标签管理
-  -> smartparcel-gateway local API
-  -> BLE_BACKEND=mock 或 BLE_BACKEND=real
-  -> nRF52810 标签 GATT Service
-  -> RGB LED / 蜂鸣器
-```
-
-gateway 当前已提供 BLE 标签管理 local API，并支持 `BLE_BACKEND=mock/real`。
-
-- `mock` 后端用于无硬件演示。
-- `real` 后端通过 `bleak` 扫描和控制真实 BLE 标签。
-- 员工 BLE 标签管理接口已经支持 mock/real。
-- 门禁 `gate-access-card` 当前仍以原 mock BLE 流程为主，后续再迁移到 real BLE。
-
-## 3. 环境准备
-
-```powershell
+```bash
 cd smartparcel-gateway
-Remove-Item -Recurse -Force .\.venv -ErrorAction SilentlyContinue
-py -3.11 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+bash deploy/install.sh
 ```
 
-检查不要混入 nRF 依赖：
+### 2.2 配置 .env
 
-```powershell
-python -m pip show west
-python -m pip show pyelftools
-```
-
-预期：
-
-```text
-WARNING: Package(s) not found: west
-WARNING: Package(s) not found: pyelftools
-```
-
-`smartparcel-gateway/.venv` 只用于 gateway Python 项目，不用于编译 `clip-node-nrf52810`。
-
-## 4. .env 配置
-
-复制配置：
-
-```powershell
-copy .env.example .env
-```
-
-关键配置项：
+编辑 `.env`，至少设置：
 
 ```env
-GATEWAY_CODE=GW001
-GATEWAY_SECRET=gw-secret-demo
-STATION_ID=1
-SERVER_BASE_URL=http://127.0.0.1:18000
+GATEWAY_DEVICE_ID=GWDEV-0001
+GATEWAY_SERIAL=SPS-GW-0001
+WIFI_AP_PASSWORD=your-secure-password-8chars
 SQLITE_PATH=./data/gateway.db
-BLE_BACKEND=mock
 ```
 
-`BLE_BACKEND` 可选：
+**不要**手动设置 `GATEWAY_SECRET` —— 它由 server 在绑定时下发。
 
-```env
-BLE_BACKEND=mock
-BLE_BACKEND=real
-```
+### 2.3 初始化数据库
 
-## 5. 启动 local API
-
-```powershell
+```bash
 python -m gateway.main init-db
-python -m gateway.main local-api --host 0.0.0.0 --port 19000
 ```
 
-健康检查：
+### 2.4 查看状态
 
-```powershell
-Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/health"
+```bash
+python -m gateway.main status
 ```
 
-## 6. BLE_BACKEND=mock/real
+### 2.5 启动网关
 
-`BLE_BACKEND=mock`：
+自动模式（推荐）：
 
-- 不需要硬件。
-- 扫描会返回固定测试标签 `SPS-F01-20260610-0001`。
-- 适合小程序页面演示和 API 闭环测试。
+```bash
+python -m gateway.main run
+```
 
-`BLE_BACKEND=real`：
+- UNBOUND 状态：自动开启 Wi-Fi 热点 + provisioning API，等待小程序绑定。
+- BOUND 状态：校验密钥、发送 heartbeat、启动 local API + 同步循环 + MQTT。
 
-- 需要 gateway 设备具备蓝牙适配器。
-- 需要系统允许 Python/`bleak` 扫描和连接 BLE 设备。
-- 真实标签不能被其他设备持续占用连接。
+手动 provisioning 模式：
 
-## 7. BLE 标签管理 API
+```bash
+python -m gateway.main provisioning
+```
 
-主要接口：
+## 3. 绑定流程
 
-```text
-GET  /local/health
+完整流程见 [`docs/gateway_provisioning_flow.md`](../docs/gateway_provisioning_flow.md)。
+
+```
+1. 网关开机 → 检查绑定状态 → UNBOUND → 开启热点 SmartParcel-GW-XXXX
+2. 员工手机连接热点
+3. 小程序读取网关 status: GET http://192.168.4.1:19000/local/provisioning/status
+4. 小程序向 VPS server 提交注册申请（gateway_device_id, gateway_serial, station_id, staff token）
+5. Server 返回绑定参数（registration_token, server_base_url, gateway_code, station_id, mqtt 配置）
+6. 小程序调用: POST http://192.168.4.1:19000/local/provisioning/bind
+7. 网关调用 server: POST /api/v1/gateways/bootstrap/activate
+8. Server 返回长期 gateway_secret
+9. 网关保存配置、发送 heartbeat
+10. heartbeat 成功 → 状态切换为 BOUND → ONLINE
+11. 关闭开放式 provisioning API，启动完整 runtime
+```
+
+### 网络说明
+
+- 如果网关热点有外网上联（以太网/4G/第二 Wi-Fi + NAT），小程序可直接通过热点访问 server。
+- 如果热点无外网，小程序应先通过蜂窝网络从 server 获取绑定参数，再连接热点写入网关。
+
+## 4. 配置参考
+
+完整配置项见 `.env.example`。
+
+关键配置：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `GATEWAY_DEVICE_ID` | 网关设备 ID | 无 |
+| `GATEWAY_SERIAL` | 网关序列号 | 无 |
+| `BINDING_STATUS` | 绑定状态 | UNBOUND |
+| `SERVER_BASE_URL` | Server API 地址 | 无 |
+| `BLE_BACKEND` | BLE 后端（仅 `real`） | real |
+| `WIFI_AP_SSID_PREFIX` | 热点 SSID 前缀 | SmartParcel-GW |
+| `WIFI_AP_ADDRESS` | 热点 IP | 192.168.4.1 |
+| `PROVISIONING_ENABLED` | 是否允许配网 | true |
+| `LOCAL_API_TOKEN_TTL_SECONDS` | 本地 token 有效期 | 3600 |
+| `ALLOW_DEV_HTTP` | 允许开发环境 HTTP | false |
+| `ALLOW_UNSAFE_DEV_AUTOREGISTER` | 允许不安全自动注册 | false |
+
+## 5. Local API
+
+### 5.1 公开接口（无需认证）
+
+```
+GET /local/health
+GET /local/provisioning/status
+POST /local/provisioning/bind
+POST /local/provisioning/verify
+```
+
+### 5.2 业务接口（需要 Bearer token）
+
+```
+POST /local/gate/access-card
 POST /local/tags/scan
 POST /local/tags/register-from-ble
 GET  /local/tags
@@ -128,207 +131,129 @@ POST /local/tags/{tag_id}/stop
 GET  /local/tags/{tag_id}/status
 ```
 
-`POST /local/tags/scan` 请求示例：
+认证方式：`Authorization: Bearer <local_session_token>`
 
-```json
-{
-  "timeout_sec": 5
-}
+## 6. 安全机制
+
+### 6.1 Server-Gateway HMAC
+
+所有 gateway→server 请求使用 HMAC-SHA256 签名：
+
+```
+X-Gateway-Code: GW001
+X-Gateway-Timestamp: <unix_seconds>
+X-Gateway-Nonce: <random_hex>
+X-Gateway-Body-SHA256: <sha256>
+X-Gateway-Signature: HMAC-SHA256(secret, "METHOD\npath\nts\nnonce\nbody_sha256")
 ```
 
-`POST /local/tags/register-from-ble` 请求示例：
+### 6.2 本地 API 安全
 
-```json
-{
-  "ble_name": "SPS-F01-20260610-0001",
-  "ble_address": "MOCK:TAG:FACTORY:0001"
-}
+- 未绑定状态：只开放 `/local/health` 和 `/local/provisioning/*`
+- 绑定状态：业务接口需要 `Authorization: Bearer <token>`
+- Token 仅存储 SHA-256 哈希
+- 支持 TTL 过期和撤销
+- 认证失败写入审计日志
+
+### 6.3 防重放 / 防篡改
+
+Provisioning bind 接口：
+
+- `X-Local-Timestamp` 时间窗口校验（300 秒）
+- `X-Local-Nonce` 去重
+- `X-Local-Body-SHA256` 请求体完整性校验
+
+### 6.4 安全审计
+
+本地审计记录事件类型：
+
+- `provisioning_started`, `provisioning_bind_attempt`, `provisioning_bind_success`, `provisioning_bind_failed`
+- `local_auth_success`, `local_auth_failed`, `local_api_unauthorized`
+- `heartbeat_success`, `heartbeat_failed`
+- `server_signature_rejected`, `replay_detected`, `suspicious_request`
+
+**绝不记录**：`gateway_secret`、明文 token、明文 credential_value。
+
+## 7. BLE 标签管理
+
+### 7.1 后端
+
+仅支持 `BLE_BACKEND=real`（默认）。不再支持 mock fallback。
+
+要求：
+- Linux 蓝牙适配器（BlueZ）
+- `bleak` Python 包
+- 标签 BLE 名称格式：`SPS-{factory}-{date}-{serial}` 或 `SPS-TAG-{hex}`
+
+如果真实 BLE 不可用，会明确报错：
+- `bleak_not_installed`
+- `scan_failed`
+- `connect_failed`
+- `command_failed`
+
+### 7.2 标签命名
+
+真实标签：
+```
+SPS-F01-20260610-0001  (factory code, production date, serial)
 ```
 
-`POST /local/tags/{tag_id}/wake` 请求示例：
-
-```json
-{
-  "color": "BLUE",
-  "duration_sec": 30
-}
+注册后 gateway 分配：
 ```
-
-## 8. 标签命名与本地编号规则
-
-真实标签推荐使用出厂 BLE 名称：
-
-```text
-SPS-F01-20260610-0001
-```
-
-格式：
-
-```text
-SPS-{factory_code}-{production_date}-{serial_no}
-```
-
-注册到 gateway 后，gateway 分配本地编号：
-
-```text
 tag_id = SPS-TAG-0001
 display_name = 标签 001
 tag_uid = SPS-F01-20260610-0001
 ```
 
-员工端列表优先展示 `display_name`，详情页展示 `tag_id`、`tag_uid`、`ble_name`、`ble_address`、状态、电池和最近连接时间。
+## 8. CLI 命令
 
-## 9. 与 server 同步
-
-gateway 与 server 的关系：
-
-- gateway 通过 `heartbeat` 上报在线状态。
-- gateway 通过 `sync-push` 上传入站、取件、门禁审计和标签异常摘要。
-- gateway 通过 `sync-pull` 拉取 server 侧任务。
-- server 不直接控制 BLE 标签。
-- server 不保存完整标签实时状态。
-
-常用命令：
-
-```powershell
-python -m gateway.main health
-python -m gateway.main heartbeat
-python -m gateway.main sync-push
-python -m gateway.main sync-pull
+```bash
+python -m gateway.main init-db          # 初始化数据库
+python -m gateway.main status           # 查看状态
+python -m gateway.main run              # 自动启动（推荐）
+python -m gateway.main provisioning     # 仅 provisioning 模式
+python -m gateway.main hotspot-start    # 手动开启热点
+python -m gateway.main hotspot-stop     # 手动关闭热点
+python -m gateway.main local-api        # 仅启动 local API
+python -m gateway.main health           # 检查 server 健康
+python -m gateway.main heartbeat        # 发送 heartbeat
+python -m gateway.main sync-pull        # 拉取同步数据
+python -m gateway.main sync-push        # 推送同步数据
+python -m gateway.main bootstrap-activate  # 管理员直接激活网关
+python -m gateway.main bind-tag         # 绑定标签到包裹
+python -m gateway.main register-tag     # 注册标签
+python -m gateway.main list-tags        # 列出标签
+python -m gateway.main list-parcels     # 列出包裹
+python -m gateway.main list-tasks       # 列出任务
 ```
 
-## 10. mock NFC / 门禁流程当前状态
+## 9. 测试
 
-`mock-nfc` 和 `gate-access-card` 是历史阶段 A 的本地门禁验证流程。当前仍可用于演示本地认证、取件会话、`TAG_WAKE` task 和同步审计。
-
-需要注意：
-
-- 员工 BLE 标签管理接口已经支持 mock/real。
-- 门禁 `gate-access-card` 当前仍以旧 mock BLE 流程为主。
-- 不要把门禁刷卡流程理解为已经完全迁移到真实 BLE。
-
-历史 mock NFC / 阶段 A 流程见 `docs/legacy_stage_a_mock_flow.md`。门禁读卡流程设计见 `docs/gateway_gate_access_flow.md`。
-
-## 11. 测试流程
-
-### 11.1 初始化数据库并启动 local API
-
-```powershell
-copy .env.example .env
-python -m gateway.main init-db
-python -m gateway.main local-api --host 0.0.0.0 --port 19000
+```bash
+cd smartparcel-gateway
+pytest tests/ -v
 ```
 
-### 11.2 mock BLE 标签扫描
+测试覆盖：
+- `test_gateway_config.py` — 配置加载、默认值、绑定状态
+- `test_gateway_security.py` — HMAC 签名、header 构建、哈希一致性
+- `test_local_api_auth.py` — 未绑定阻拦、token 认证、过期处理、审计写入
+- `test_gateway_provisioning.py` — provisioning API、防重放、字段校验
 
-`.env` 设置：
+## 10. 常见问题
 
-```env
-BLE_BACKEND=mock
-```
+| 问题 | 检查 |
+|------|------|
+| BLE 扫描为空 | 标签上电？固件烧录？BLE_BACKEND=real？蓝牙权限？ |
+| 热点启动失败 | `nmcli` 已安装？Wi-Fi 支持 AP 模式？有 root/NetworkManager 权限？ |
+| 绑定失败 | server 可达？registration_token 未过期？station_id 匹配？ |
+| 小程序无法访问 | 手机连接了网关热点？gateway IP 是 `192.168.4.1`？ |
+| Token 认证失败 | token 过期？已撤销？使用了正确的 Bearer 格式？ |
 
-重启 local API 后执行：
+## 11. 安全注意事项
 
-```powershell
-Invoke-RestMethod `
-  -Method POST `
-  -Uri "http://127.0.0.1:19000/local/tags/scan" `
-  -ContentType "application/json" `
-  -Body '{"timeout_sec":5}'
-```
-
-预期返回包含：
-
-```text
-SPS-F01-20260610-0001
-```
-
-### 11.3 注册标签
-
-```powershell
-$body = @{
-  ble_name = "SPS-F01-20260610-0001"
-  ble_address = "MOCK:TAG:FACTORY:0001"
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method POST `
-  -Uri "http://127.0.0.1:19000/local/tags/register-from-ble" `
-  -ContentType "application/json" `
-  -Body $body
-```
-
-预期：
-
-```text
-tag_id = SPS-TAG-0001
-display_name = 标签 001
-tag_uid = SPS-F01-20260610-0001
-```
-
-### 11.4 查看标签列表和详情
-
-```powershell
-Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags"
-Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001"
-```
-
-### 11.5 connect、wake、stop、status
-
-```powershell
-Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/connect"
-
-$wakeBody = @{
-  color = "BLUE"
-  duration_sec = 30
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method POST `
-  -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/wake" `
-  -ContentType "application/json" `
-  -Body $wakeBody
-
-Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/stop"
-Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:19000/local/tags/SPS-TAG-0001/status"
-```
-
-### 11.6 真实 BLE 测试
-
-`.env` 设置：
-
-```env
-BLE_BACKEND=real
-```
-
-重启 local API 后执行：
-
-```powershell
-Invoke-RestMethod `
-  -Method POST `
-  -Uri "http://127.0.0.1:19000/local/tags/scan" `
-  -ContentType "application/json" `
-  -Body '{"timeout_sec":5}'
-```
-
-预期扫描到真实标签：
-
-```text
-SPS-F01-20260610-0001
-```
-
-## 12. 常见问题
-
-扫描不到真实标签时，优先检查：
-
-```text
-1. 标签是否已上电。
-2. 固件是否已烧录。
-3. BLE 名称是否为 SPS-F01-20260610-0001。
-4. gateway 设备是否有蓝牙适配器。
-5. Windows/Linux 蓝牙权限是否可用。
-6. BLE_BACKEND 是否已经改为 real 并重启 local API。
-7. 标签是否已经被其他设备连接占用。
-```
-
-如果小程序真机访问失败，检查 `gatewayBaseUrl` 是否为 gateway 局域网 IP，而不是 `127.0.0.1`。
+- **不要**提交 `.env` 到 Git
+- **不要**在日志或 API 响应中输出 `GATEWAY_SECRET`
+- **不要**让 `gateway_secret` 出现在小程序端
+- **不要**在生产环境启用 `ALLOW_DEV_HTTP=true`
+- **不要**在正式运行路径中使用 mock BLE/NFC

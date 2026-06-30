@@ -1,4 +1,17 @@
+/**
+ * Generic HTTP request wrapper.
+ *
+ * Returns a structured result — never falls back to mock data.
+ *   Success: { ok: true,  statusCode: 200, data: res.data }
+ *   Failure: { ok: false, statusCode,       error, data }
+ *
+ * Supports:
+ *   - custom headers (including Authorization: Bearer <token>)
+ *   - configurable timeout
+ *   - 401 / 403 preserved for caller handling (no auto-redirect)
+ */
 const CONFIG = require('./config')
+const { isAllowedLocalHttpUrl, isHttpsUrl } = require('./security-utils')
 
 function request({
   baseUrl = '',
@@ -6,10 +19,20 @@ function request({
   method = 'GET',
   data = {},
   headers = {},
-  mock,
-  useMockWhenRequestFail = CONFIG.useMockWhenRequestFail,
   timeoutMs = CONFIG.requestTimeoutMs
 }) {
+  // Safety: reject insecure server URLs unless explicitly allowed.
+  if (baseUrl && !isAllowedLocalHttpUrl(baseUrl) && !isHttpsUrl(baseUrl)) {
+    if (!CONFIG.allowInsecureServerHttpInDev) {
+      return Promise.resolve({
+        ok: false,
+        statusCode: 0,
+        error: 'SECURITY: serverBaseUrl must be HTTPS in production',
+        data: null
+      })
+    }
+  }
+
   return new Promise((resolve) => {
     let settled = false
     let timer = null
@@ -22,7 +45,12 @@ function request({
     }
 
     timer = setTimeout(() => {
-      finish(fallback(`request timeout after ${timeoutMs}ms`, mock, useMockWhenRequestFail))
+      finish({
+        ok: false,
+        statusCode: 0,
+        error: `request timeout after ${timeoutMs}ms`,
+        data: null
+      })
     }, timeoutMs + 800)
 
     wx.request({
@@ -33,32 +61,37 @@ function request({
       header: { 'Content-Type': 'application/json', ...headers },
       success(res) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          finish({ ok: true, source: 'real', data: res.data })
+          finish({ ok: true, statusCode: res.statusCode, data: res.data })
           return
         }
-        finish(fallback(`HTTP ${res.statusCode}`, mock, useMockWhenRequestFail))
+        // Preserve status code for 401/403 handling by callers.
+        finish({
+          ok: false,
+          statusCode: res.statusCode,
+          error: `HTTP ${res.statusCode}`,
+          data: res.data
+        })
       },
       fail(err) {
-        finish(fallback(err.errMsg || 'request fail', mock, useMockWhenRequestFail))
+        finish({
+          ok: false,
+          statusCode: 0,
+          error: err.errMsg || 'network request failed',
+          data: null
+        })
       },
       complete() {
         if (!settled) {
-          finish(fallback('request completed without result', mock, useMockWhenRequestFail))
+          finish({
+            ok: false,
+            statusCode: 0,
+            error: 'request completed without result',
+            data: null
+          })
         }
       }
     })
   })
-}
-
-function fallback(reason, mock, useMockWhenRequestFail) {
-  if (useMockWhenRequestFail && typeof mock === 'function') {
-    try {
-      return { ok: true, source: 'mock', data: mock(), reason }
-    } catch (err) {
-      return { ok: false, source: 'error', error: err && err.message ? err.message : reason }
-    }
-  }
-  return { ok: false, source: 'error', error: reason }
 }
 
 module.exports = { request }

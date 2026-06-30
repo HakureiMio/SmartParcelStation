@@ -1,41 +1,14 @@
-from __future__ import annotations
+"""
+DEPRECATED: Mock BLE service has been moved to gateway/legacy/mock_ble_service.py.
 
-import random
-from datetime import datetime
+Importing this module in production code will raise an ImportError.
+Use RealBleCommandService from gateway.services.ble.adapter for production.
+For tests, use pytest fixtures or fake classes.
+"""
 
-from gateway.services.ble_service import BleService
-
-
-class MockBleService(BleService):
-    def tag_wake(
-        self,
-        tag_id: str,
-        led_color: str = "BLUE",
-        blink_pattern: str = "SLOW",
-        beep_pattern: str = "SHORT_INTERVAL",
-        duration_sec: int = 30,
-        pickup_session_id: str | None = None,
-    ) -> dict:
-        return {
-            "tag_id": tag_id,
-            "action": "TAG_WAKE",
-            "result": "OK",
-            "led_color": led_color,
-            "blink_pattern": blink_pattern,
-            "beep_pattern": beep_pattern,
-            "duration_sec": duration_sec,
-            "pickup_session_id": pickup_session_id,
-            "ts": datetime.utcnow().isoformat(),
-        }
-
-    def tag_stop(self, tag_id: str, pickup_session_id: str | None = None) -> dict:
-        return {"tag_id": tag_id, "action": "TAG_STOP", "result": "OK", "pickup_session_id": pickup_session_id, "ts": datetime.utcnow().isoformat()}
-
-    def tag_status_query(self, tag_id: str) -> dict:
-        return {
-            "tag_id": tag_id,
-            "action": "TAG_STATUS_QUERY",
-            "result": "OK",
-            "battery_level": random.randint(40, 99),
-            "ts": datetime.utcnow().isoformat(),
-        }
+raise ImportError(
+    "MockBleService has been removed from the production code path. "
+    "Use RealBleCommandService from gateway.services.ble.adapter. "
+    "The legacy mock implementation is available at gateway.legacy.mock_ble_service "
+    "for historical reference and testing only."
+)

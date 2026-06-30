@@ -1,1 +1,63 @@
-<view class="container safe"><view class="title">网关状态</view><view class="card"><view class="row"><text class="label">本地网关</text><text class="value">{{gatewayOnline ? '在线' : '未连接'}}</text></view><view class="row"><text class="label">服务器</text><text class="value">{{serverOnline ? '连接正常' : '未连接'}}</text></view><view class="row"><text class="label">当前模式</text><text class="value">{{mode}}</text></view><view class="hint">最近检查：{{checkedAt}}</view></view><button class="btn btn-primary" bindtap="check">重新检查</button></view>
+<view class="page safe">
+  <view class="title">网关状态</view>
+  <view class="subtitle">服务器与本地网关连接状态</view>
+
+  <!-- Status Card -->
+  <view class="glass-card status-card">
+    <view class="row">
+      <text class="label">服务器</text>
+      <text class="value" style="color:{{serverOnline ? '#166534' : '#b91c1c'}}">
+        {{serverOnline ? '在线' : '未连接'}}
+      </text>
+    </view>
+    <view class="row">
+      <text class="label">本地网关</text>
+      <text class="value" style="color:{{gatewayReachable ? '#166534' : '#b91c1c'}}">
+        {{gatewayReachable ? '可达' : '不可达'}}
+      </text>
+    </view>
+    <view class="row">
+      <text class="label">绑定状态</text>
+      <text class="value" style="color:{{bindingStatus === 'BOUND' ? '#166534' : '#b45309'}}">
+        {{bindingStatus === 'BOUND' ? '已绑定' : '未绑定'}}
+      </text>
+    </view>
+    <view class="row">
+      <text class="label">本地会话</text>
+      <text class="value" style="color:{{localSessionValid ? '#166534' : '#b91c1c'}}">
+        {{localSessionValid ? '有效' : '缺失或已过期'}}
+      </text>
+    </view>
+    <view wx:if="{{gatewayCode}}" class="row">
+      <text class="label">网关编码</text>
+      <text class="value">{{gatewayCode}}</text>
+    </view>
+    <view wx:if="{{stationId}}" class="row">
+      <text class="label">站点</text>
+      <text class="value">{{stationId}}</text>
+    </view>
+    <view wx:if="{{gatewayBaseUrl}}" class="row">
+      <text class="label">网关地址</text>
+      <text class="value" style="font-size:22rpx; word-break:break-all;">{{gatewayBaseUrl}}</text>
+    </view>
+    <view class="hint" style="margin-top:16rpx;">最近检查：{{lastCheckedAt || '未检查'}}</view>
+    <view class="error" wx:if="{{error}}" style="margin-top:16rpx;">{{error}}</view>
+  </view>
+
+  <!-- Warning: local session missing -->
+  <view class="notice" wx:if="{{!localSessionValid}}">
+    尚未绑定网关或本地授权已过期。请先完成「网关注册 / 初始化」以获得本地访问权限。
+  </view>
+
+  <!-- Warning: 401 -->
+  <view class="error" wx:if="{{gatewayReachable && !localSessionValid && bindingStatus === 'BOUND'}}">
+    本地授权已失效，请重新完成网关绑定流程。
+  </view>
+
+  <!-- Action buttons -->
+  <button class="glass-button primary-button" bindtap="checkAll" loading="{{loading}}">检查全部状态</button>
+  <button class="glass-button secondary-button" bindtap="checkServer">检查服务器</button>
+  <button class="glass-button secondary-button" bindtap="checkGateway">检查网关</button>
+  <button class="glass-button staff-button" bindtap="goRegister" wx:if="{{!localSessionValid}}">前往网关注册 / 初始化</button>
+  <button class="glass-button warn-button" bindtap="clearLocalAuth" wx:if="{{localSessionValid}}">清除本地网关授权</button>
+</view>

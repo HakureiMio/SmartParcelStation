@@ -1,9 +1,12 @@
 #pragma once
 
+#include <stdint.h>
+
 #include "esp_err.h"
 #include "gateway_client.h"
 
 esp_err_t display_ui_init(void);
+esp_err_t display_ui_fill_color(uint16_t rgb565, const char *name);
 void display_ui_show_booting(void);
 void display_ui_show_network_status(const char *text);
 void display_ui_show_pn532_status(const char *text);

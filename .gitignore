@@ -19,6 +19,7 @@ pytest-cache-files-*/
 .env
 .env.*
 !.env.example
+!.env.vps.example
 
 # Local database
 *.db

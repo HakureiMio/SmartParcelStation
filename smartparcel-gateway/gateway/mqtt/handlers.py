@@ -3,11 +3,11 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from gateway.models.entities import TaskTargetType, TaskType
-from gateway.services.mock_ble_service import MockBleService
+from gateway.services.ble_service import BleService
 from gateway.services.task_service import TaskService
 
 
-def handle_server_command(db: Session, payload: dict, ble: MockBleService) -> dict:
+def handle_server_command(db: Session, payload: dict, ble: BleService) -> dict:
     task_service = TaskService(db)
     cmd_type = payload.get("task_type", "SERVER_COMMAND")
 
