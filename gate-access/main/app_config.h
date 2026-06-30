@@ -70,17 +70,21 @@
 #define SPS_ESP8266_UART_BUF_SIZE       2048
 #define SPS_ESP8266_UART_LOOPBACK_TEST  0
 
-/* ── PN532 I2C ──────────────────────────────────────────────────
- *
- * 屏幕优先调试模式下不初始化 PN532。
- */
-#define SPS_PN532_I2C_PORT          I2C_NUM_0
-#define SPS_PN532_I2C_SDA_GPIO      GPIO_NUM_20
-#define SPS_PN532_I2C_SCL_GPIO      GPIO_NUM_21
-#define SPS_PN532_IRQ_GPIO          GPIO_NUM_22
-#define SPS_PN532_RST_GPIO          GPIO_NUM_23
-#define SPS_PN532_I2C_FREQ_HZ       100000
-#define SPS_PN532_I2C_ADDR          0x24
+/* ── PN532 HSU/UART ──────────────────────────────────────────────
+ * Set the PN532 board mode switches to HSU before power-on.
+ * ESP32-P4 GPIO20 (TX) -> PN532 RXD
+ * ESP32-P4 GPIO21 (RX) <- PN532 TXD
+ * IRQ is not used in HSU mode. RST remains disabled because many
+ * breakout boards expose RSTO (an output), not a reset input. */
+#define SPS_PN532_UART_PORT         UART_NUM_2
+#define SPS_PN532_UART_TX_GPIO      GPIO_NUM_20
+#define SPS_PN532_UART_RX_GPIO      GPIO_NUM_21
+#define SPS_PN532_UART_BAUD         115200
+#define SPS_PN532_UART_BUF_SIZE     512
+#define SPS_PN532_UART_TIMEOUT_MS   1200
+#define SPS_PN532_UART_LOOPBACK_TEST 1
+#define SPS_PN532_USE_RESET         0
+#define SPS_PN532_RST_GPIO          GPIO_NUM_NC
 #define SPS_CARD_DEBOUNCE_MS        3000
 #define SPS_CARD_POLL_INTERVAL_MS   100
 

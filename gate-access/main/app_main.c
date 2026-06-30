@@ -61,6 +61,15 @@ static const demo_color_t s_color_cycle[] = {
 static void pn532_uid_test_task(void *arg)
 {
     (void)arg;
+#if SPS_PN532_UART_LOOPBACK_TEST
+    esp_err_t loopback_err = pn532_reader_uart_loopback_test();
+    if (loopback_err == ESP_OK) {
+        ESP_LOGI(TAG, "PN532 UART2 hardware path verified; disable loopback macro before reconnecting PN532");
+    } else {
+        ESP_LOGE(TAG, "PN532 UART2 hardware path FAILED: %s", esp_err_to_name(loopback_err));
+    }
+    vTaskDelete(NULL);
+#else
     char latched_uid[32] = {0};
     bool card_latched = false;
     unsigned consecutive_misses = 0;
@@ -116,6 +125,7 @@ static void pn532_uid_test_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));
         }
     }
+#endif
 }
 #endif
 

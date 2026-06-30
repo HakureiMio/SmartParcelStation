@@ -3,14 +3,15 @@
 #include <string.h>
 
 #include "app_config.h"
-#include "driver/i2c.h"
+#include "driver/uart.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char *TAG = "pn532";
-static bool s_i2c_driver_installed;
+static bool s_uart_driver_installed;
 
 #define PN532_PREAMBLE          0x00
 #define PN532_STARTCODE1        0x00
@@ -18,13 +19,41 @@ static bool s_i2c_driver_installed;
 #define PN532_POSTAMBLE         0x00
 #define PN532_HOST_TO_PN532     0xD4
 #define PN532_PN532_TO_HOST     0xD5
-#define PN532_I2C_READY         0x01
-
 #define PN532_CMD_GET_FIRMWARE  0x02
 #define PN532_CMD_SAM_CONFIG    0x14
 #define PN532_CMD_IN_LIST       0x4A
 
 static const uint8_t PN532_ACK[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+
+static esp_err_t pn532_uart_configure(void)
+{
+    uart_config_t uart_config = {
+        .baud_rate = SPS_PN532_UART_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    if (!s_uart_driver_installed) {
+        ESP_RETURN_ON_ERROR(uart_driver_install(SPS_PN532_UART_PORT,
+                                                 SPS_PN532_UART_BUF_SIZE,
+                                                 SPS_PN532_UART_BUF_SIZE,
+                                                 0, NULL, 0),
+                            TAG, "PN532 UART driver install failed");
+        s_uart_driver_installed = true;
+    }
+    ESP_RETURN_ON_ERROR(uart_param_config(SPS_PN532_UART_PORT, &uart_config), TAG,
+                        "PN532 UART config failed");
+    ESP_RETURN_ON_ERROR(uart_set_pin(SPS_PN532_UART_PORT,
+                                     SPS_PN532_UART_TX_GPIO,
+                                     SPS_PN532_UART_RX_GPIO,
+                                     UART_PIN_NO_CHANGE,
+                                     UART_PIN_NO_CHANGE),
+                        TAG, "PN532 UART pin config failed");
+    return ESP_OK;
+}
 
 static uint8_t checksum(const uint8_t *data, size_t len)
 {
@@ -35,57 +64,61 @@ static uint8_t checksum(const uint8_t *data, size_t len)
     return (uint8_t)(~sum + 1);
 }
 
-static esp_err_t pn532_wait_ready(TickType_t timeout_ticks)
+static esp_err_t uart_read_exact(uint8_t *buffer, size_t length, int timeout_ms)
 {
-    TickType_t start = xTaskGetTickCount();
-    uint8_t status = 0;
-
-    while ((xTaskGetTickCount() - start) < timeout_ticks) {
-        esp_err_t err = i2c_master_read_from_device(
-            SPS_PN532_I2C_PORT,
-            SPS_PN532_I2C_ADDR,
-            &status,
-            1,
-            pdMS_TO_TICKS(100));
-        if (err == ESP_OK && status == PN532_I2C_READY) {
-            return ESP_OK;
+    size_t received = 0;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (received < length && esp_timer_get_time() < deadline) {
+        int remaining_ms = (int)((deadline - esp_timer_get_time()) / 1000);
+        if (remaining_ms < 1) {
+            remaining_ms = 1;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        int count = uart_read_bytes(SPS_PN532_UART_PORT, buffer + received,
+                                    length - received,
+                                    pdMS_TO_TICKS(remaining_ms > 50 ? 50 : remaining_ms));
+        if (count > 0) {
+            received += (size_t)count;
+        }
     }
-
-    return ESP_ERR_TIMEOUT;
+    return received == length ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
-static esp_err_t pn532_read_raw(uint8_t *buffer, size_t buffer_len)
+static esp_err_t uart_find_sequence(const uint8_t *sequence, size_t sequence_len, int timeout_ms)
 {
-    ESP_RETURN_ON_ERROR(pn532_wait_ready(pdMS_TO_TICKS(1000)), TAG, "PN532 not ready");
-
-    uint8_t tmp[96] = {0};
-    if (buffer_len + 1 > sizeof(tmp)) {
-        return ESP_ERR_INVALID_SIZE;
+    size_t matched = 0;
+    uint8_t received[32] = {0};
+    size_t received_len = 0;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (esp_timer_get_time() < deadline) {
+        uint8_t byte = 0;
+        int count = uart_read_bytes(SPS_PN532_UART_PORT, &byte, 1, pdMS_TO_TICKS(20));
+        if (count <= 0) {
+            continue;
+        }
+        if (received_len < sizeof(received)) {
+            received[received_len++] = byte;
+        }
+        if (byte == sequence[matched]) {
+            if (++matched == sequence_len) {
+                return ESP_OK;
+            }
+        } else {
+            matched = byte == sequence[0] ? 1 : 0;
+        }
     }
-
-    ESP_RETURN_ON_ERROR(
-        i2c_master_read_from_device(SPS_PN532_I2C_PORT, SPS_PN532_I2C_ADDR, tmp, buffer_len + 1, pdMS_TO_TICKS(1000)),
-        TAG,
-        "PN532 read failed");
-
-    if (tmp[0] != PN532_I2C_READY) {
-        return ESP_ERR_INVALID_RESPONSE;
+    if (received_len > 0) {
+        ESP_LOGW(TAG, "PN532 UART received %u byte(s), but expected sequence was absent:",
+                 (unsigned)received_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, received, received_len, ESP_LOG_WARN);
+    } else {
+        ESP_LOGW(TAG, "PN532 UART RX remained silent for %dms", timeout_ms);
     }
-    memcpy(buffer, &tmp[1], buffer_len);
-    return ESP_OK;
+    return ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t pn532_read_ack(void)
 {
-    uint8_t ack[sizeof(PN532_ACK)] = {0};
-    ESP_RETURN_ON_ERROR(pn532_read_raw(ack, sizeof(ack)), TAG, "read ACK failed");
-    if (memcmp(ack, PN532_ACK, sizeof(PN532_ACK)) != 0) {
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, ack, sizeof(ack), ESP_LOG_WARN);
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    return ESP_OK;
+    return uart_find_sequence(PN532_ACK, sizeof(PN532_ACK), SPS_PN532_UART_TIMEOUT_MS);
 }
 
 static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
@@ -106,34 +139,42 @@ static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
     frame[6 + cmd_len] = checksum(&frame[5], len);
     frame[7 + cmd_len] = PN532_POSTAMBLE;
 
-    ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(SPS_PN532_I2C_PORT, SPS_PN532_I2C_ADDR, frame, cmd_len + 8, pdMS_TO_TICKS(1000)),
-        TAG,
-        "PN532 write failed");
+    uart_flush_input(SPS_PN532_UART_PORT);
+    int written = uart_write_bytes(SPS_PN532_UART_PORT, frame, cmd_len + 8);
+    ESP_RETURN_ON_FALSE(written == (int)(cmd_len + 8), ESP_FAIL, TAG,
+                        "PN532 UART write failed: %d/%u", written, (unsigned)(cmd_len + 8));
+    ESP_RETURN_ON_ERROR(uart_wait_tx_done(SPS_PN532_UART_PORT, pdMS_TO_TICKS(100)), TAG,
+                        "PN532 UART TX timeout");
 
-    return pn532_read_ack();
+    ESP_RETURN_ON_ERROR(pn532_read_ack(), TAG, "PN532 ACK timeout");
+    return ESP_OK;
 }
 
 static esp_err_t pn532_read_response(uint8_t expected_cmd, uint8_t *payload, size_t payload_size, size_t *payload_len)
 {
-    uint8_t frame[96] = {0};
-    ESP_RETURN_ON_ERROR(pn532_read_raw(frame, sizeof(frame)), TAG, "read response failed");
+    const uint8_t start_code[] = {PN532_PREAMBLE, PN532_STARTCODE1, PN532_STARTCODE2};
+    ESP_RETURN_ON_ERROR(uart_find_sequence(start_code, sizeof(start_code), SPS_PN532_UART_TIMEOUT_MS),
+                        TAG, "PN532 response timeout");
 
-    if (frame[0] != PN532_PREAMBLE || frame[1] != PN532_STARTCODE1 || frame[2] != PN532_STARTCODE2) {
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    if ((uint8_t)(frame[3] + frame[4]) != 0) {
+    uint8_t header[2] = {0};
+    ESP_RETURN_ON_ERROR(uart_read_exact(header, sizeof(header), 100), TAG,
+                        "PN532 response header incomplete");
+    if ((uint8_t)(header[0] + header[1]) != 0) {
         return ESP_ERR_INVALID_CRC;
     }
 
-    size_t len = frame[3];
-    if (len < 2 || len + 7 > sizeof(frame)) {
+    size_t len = header[0];
+    if (len < 2 || len + 2 > 96) {
         return ESP_ERR_INVALID_SIZE;
     }
-    if (frame[5] != PN532_PN532_TO_HOST || frame[6] != (uint8_t)(expected_cmd + 1)) {
+
+    uint8_t body[96] = {0};
+    ESP_RETURN_ON_ERROR(uart_read_exact(body, len + 2, 200), TAG,
+                        "PN532 response body incomplete");
+    if (body[0] != PN532_PN532_TO_HOST || body[1] != (uint8_t)(expected_cmd + 1)) {
         return ESP_ERR_INVALID_RESPONSE;
     }
-    if (checksum(&frame[5], len + 1) != 0) {
+    if (checksum(body, len + 1) != 0 || body[len + 1] != PN532_POSTAMBLE) {
         return ESP_ERR_INVALID_CRC;
     }
 
@@ -142,7 +183,7 @@ static esp_err_t pn532_read_response(uint8_t expected_cmd, uint8_t *payload, siz
         return ESP_ERR_INVALID_SIZE;
     }
 
-    memcpy(payload, &frame[7], data_len);
+    memcpy(payload, &body[2], data_len);
     *payload_len = data_len;
     return ESP_OK;
 }
@@ -174,9 +215,49 @@ static void uid_to_hex(const uint8_t *uid, size_t uid_len, char *uid_hex, size_t
     uid_hex[out] = '\0';
 }
 
+esp_err_t pn532_reader_uart_loopback_test(void)
+{
+    static const uint8_t pattern[] = {
+        0x55, 0xAA, 0x00, 0xFF, 0x12, 0x34, 0x56, 0x78,
+        'P', 'N', '5', '3', '2', '-', 'U', '2',
+    };
+    uint8_t received[sizeof(pattern)] = {0};
+
+    ESP_RETURN_ON_ERROR(pn532_uart_configure(), TAG, "configure UART2 loopback failed");
+    ESP_LOGI(TAG, "=== PN532 UART2 LOOPBACK TEST ===");
+    ESP_LOGI(TAG, "Disconnect PN532 and short GPIO%d(TX) directly to GPIO%d(RX)",
+             SPS_PN532_UART_TX_GPIO, SPS_PN532_UART_RX_GPIO);
+    uart_flush_input(SPS_PN532_UART_PORT);
+
+    int written = uart_write_bytes(SPS_PN532_UART_PORT, pattern, sizeof(pattern));
+    ESP_RETURN_ON_FALSE(written == sizeof(pattern), ESP_FAIL, TAG,
+                        "UART2 loopback write failed: %d/%u", written, (unsigned)sizeof(pattern));
+    ESP_RETURN_ON_ERROR(uart_wait_tx_done(SPS_PN532_UART_PORT, pdMS_TO_TICKS(100)), TAG,
+                        "UART2 loopback TX timeout");
+
+    esp_err_t err = uart_read_exact(received, sizeof(received), 1000);
+    if (err != ESP_OK) {
+        size_t buffered = 0;
+        uart_get_buffered_data_len(SPS_PN532_UART_PORT, &buffered);
+        ESP_LOGE(TAG, "UART2 LOOPBACK FAIL: RX timeout (remaining buffered=%u)",
+                 (unsigned)buffered);
+        return err;
+    }
+    if (memcmp(received, pattern, sizeof(pattern)) != 0) {
+        ESP_LOGE(TAG, "UART2 LOOPBACK FAIL: received bytes differ");
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, received, sizeof(received), ESP_LOG_ERROR);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    ESP_LOGI(TAG, "UART2 LOOPBACK PASS: %u bytes matched on GPIO%d/GPIO%d",
+             (unsigned)sizeof(pattern), SPS_PN532_UART_TX_GPIO, SPS_PN532_UART_RX_GPIO);
+    return ESP_OK;
+}
+
 esp_err_t pn532_reader_init(void)
 {
-    if (SPS_PN532_RST_GPIO != GPIO_NUM_NC) {
+#if SPS_PN532_USE_RESET
+    {
         gpio_config_t reset_config = {
             .pin_bit_mask = 1ULL << SPS_PN532_RST_GPIO,
             .mode = GPIO_MODE_OUTPUT,
@@ -191,29 +272,44 @@ esp_err_t pn532_reader_init(void)
         ESP_LOGI(TAG, "PN532 hardware reset complete: GPIO%d low 20ms -> high",
                  SPS_PN532_RST_GPIO);
     }
+#endif
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = SPS_PN532_I2C_SDA_GPIO,
-        .scl_io_num = SPS_PN532_I2C_SCL_GPIO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = SPS_PN532_I2C_FREQ_HZ,
+    ESP_RETURN_ON_ERROR(pn532_uart_configure(), TAG, "configure PN532 HSU failed");
+
+    ESP_LOGI(TAG, "PN532 HSU: UART%d TX=GPIO%d RX=GPIO%d baud=%d 8N1",
+             SPS_PN532_UART_PORT, SPS_PN532_UART_TX_GPIO,
+             SPS_PN532_UART_RX_GPIO, SPS_PN532_UART_BAUD);
+
+    /* Match the libnfc PN532 HSU driver used by the vendor test software:
+     * two 0x55 bytes followed by fourteen zero bytes. */
+    static const uint8_t wakeup[] = {
+        0x55, 0x55,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     };
-
-    if (!s_i2c_driver_installed) {
-        ESP_RETURN_ON_ERROR(i2c_param_config(SPS_PN532_I2C_PORT, &conf), TAG, "I2C config failed");
-        ESP_RETURN_ON_ERROR(i2c_driver_install(SPS_PN532_I2C_PORT, conf.mode, 0, 0, 0), TAG, "I2C driver install failed");
-        s_i2c_driver_installed = true;
-    }
-
-    ESP_LOGI(TAG, "PN532 I2C: port=%d SDA=GPIO%d SCL=GPIO%d addr=0x%02X freq=%dHz",
-             SPS_PN532_I2C_PORT, SPS_PN532_I2C_SDA_GPIO, SPS_PN532_I2C_SCL_GPIO,
-             SPS_PN532_I2C_ADDR, SPS_PN532_I2C_FREQ_HZ);
+    uart_flush_input(SPS_PN532_UART_PORT);
+    int wake_written = uart_write_bytes(SPS_PN532_UART_PORT, wakeup, sizeof(wakeup));
+    ESP_RETURN_ON_FALSE(wake_written == sizeof(wakeup), ESP_FAIL, TAG,
+                        "PN532 wake-up write failed");
+    ESP_RETURN_ON_ERROR(uart_wait_tx_done(SPS_PN532_UART_PORT, pdMS_TO_TICKS(100)), TAG,
+                        "PN532 wake-up TX timeout");
+    vTaskDelay(pdMS_TO_TICKS(20));
+    uart_flush_input(SPS_PN532_UART_PORT);
 
     uint8_t payload[16] = {0};
     size_t payload_len = 0;
-    esp_err_t err = pn532_command(PN532_CMD_GET_FIRMWARE, NULL, 0, payload, sizeof(payload), &payload_len);
+    /* PN532 application note C106 and libnfc require SAMConfiguration as
+     * the first command after leaving LowVbat mode. */
+    uint8_t sam_args[] = {0x01, 0x14, 0x01};
+    esp_err_t err = pn532_command(PN532_CMD_SAM_CONFIG, sam_args, sizeof(sam_args),
+                                  payload, sizeof(payload), &payload_len);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PN532 wake SAMConfiguration failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "PN532 wake SAMConfiguration OK");
+
+    err = pn532_command(PN532_CMD_GET_FIRMWARE, NULL, 0, payload, sizeof(payload), &payload_len);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PN532 firmware query failed: %s", esp_err_to_name(err));
         return err;
@@ -221,13 +317,6 @@ esp_err_t pn532_reader_init(void)
     if (payload_len >= 4) {
         ESP_LOGI(TAG, "PN532 firmware: IC=0x%02X Ver=%u.%u Support=0x%02X",
                  payload[0], payload[1], payload[2], payload[3]);
-    }
-
-    uint8_t sam_args[] = {0x01, 0x14, 0x01};
-    err = pn532_command(PN532_CMD_SAM_CONFIG, sam_args, sizeof(sam_args), payload, sizeof(payload), &payload_len);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "PN532 SAMConfiguration failed: %s", esp_err_to_name(err));
-        return err;
     }
 
     ESP_LOGI(TAG, "PN532 init ok");
