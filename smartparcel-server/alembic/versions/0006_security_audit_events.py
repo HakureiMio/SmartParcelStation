@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '0006'
-down_revision = '0005'
+revision = '0006_security_audit_events'
+down_revision = '0005_user_password_auth'
 branch_labels = None
 depends_on = None
 
