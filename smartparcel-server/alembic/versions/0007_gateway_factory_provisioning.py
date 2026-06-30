@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = '0007_gateway_factory_provisioning'
+revision = '0007_gateway_provisioning'
 down_revision = '0006_security_audit_events'
 branch_labels = None
 depends_on = None
