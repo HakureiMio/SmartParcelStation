@@ -201,9 +201,12 @@ esp_err_t gateway_client_poll_auth_result(gateway_access_result_t *result)
     return ESP_OK;
 }
 
-esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_result_t *result)
+esp_err_t gateway_client_post_access_credential(const char *credential_type,
+                                                const char *credential_value,
+                                                gateway_access_result_t *result)
 {
-    if (uid_hex == NULL || result == NULL) {
+    if (credential_type == NULL || credential_type[0] == '\0' ||
+        credential_value == NULL || credential_value[0] == '\0' || result == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -215,8 +218,8 @@ esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_re
         return ESP_ERR_NO_MEM;
     }
     cJSON_AddStringToObject(root, "reader_id", SPS_READER_ID);
-    cJSON_AddStringToObject(root, "credential_type", "CARD_UID");
-    cJSON_AddStringToObject(root, "credential_value", uid_hex);
+    cJSON_AddStringToObject(root, "credential_type", credential_type);
+    cJSON_AddStringToObject(root, "credential_value", credential_value);
 
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -224,6 +227,8 @@ esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_re
         return ESP_ERR_NO_MEM;
     }
 
+    ESP_LOGI(TAG, "POST %s credential_type=%s credential_value=%s",
+             SPS_GATEWAY_PATH, credential_type, credential_value);
     memset(s_response, 0, sizeof(s_response));
     esp_err_t err = network_client_http_post_json(
         SPS_GATEWAY_HOST,
@@ -242,5 +247,15 @@ esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_re
     }
 
     parse_gateway_response(s_response, result);
+    if (result->access_granted) {
+        ESP_LOGI(TAG, "GRANTED display_text=%s", result->display_text);
+    } else {
+        ESP_LOGI(TAG, "DENIED reason=%s", result->reason);
+    }
     return ESP_OK;
+}
+
+esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_result_t *result)
+{
+    return gateway_client_post_access_credential("CARD_UID", uid_hex, result);
 }

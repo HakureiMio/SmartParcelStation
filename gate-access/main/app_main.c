@@ -329,6 +329,7 @@ static esp_err_t refresh_gate_qr(bool draw_now)
     }
     ESP_LOGI(TAG, "QR session received: session_id=%s payload_bytes=%u",
              s_qr_session.session_id, (unsigned)strlen(s_qr_session.qr_payload));
+    ESP_LOGI(TAG, "Gateway local API reachable: %s", SPS_GATEWAY_URL);
     if (!draw_now) return ESP_OK;
     err = display_ui_show_qr(s_qr_session.qr_payload);
     if (err != ESP_OK) {
@@ -417,7 +418,11 @@ static void gate_main_task(void *arg)
     display_ui_show_main_menu();
     ESP_LOGI(TAG, "MAIN_MENU ready: swipe card / scan QR / phone NFC");
 
-    char latched_uid[32] = {0};
+    char latched_type[PN532_CREDENTIAL_TYPE_MAX] = {0};
+    char latched_value[PN532_CREDENTIAL_VALUE_MAX] = {0};
+    char last_submitted_type[PN532_CREDENTIAL_TYPE_MAX] = {0};
+    char last_submitted_value[PN532_CREDENTIAL_VALUE_MAX] = {0};
+    int64_t last_submit_us = 0;
     int64_t last_auth_poll_us = 0;
     int64_t page_deadline_us = 0;
     int64_t card_absent_since_us = 0;
@@ -455,9 +460,8 @@ static void gate_main_task(void *arg)
 
         /* ── Poll PN532 for card (every loop) ─────────────── */
         if (pn532_err == ESP_OK) {
-            char uid_hex[32] = {0};
-            bool card_present = false;
-            pn532_err = pn532_reader_poll_uid(uid_hex, sizeof(uid_hex), &card_present);
+            pn532_credential_t credential;
+            pn532_err = pn532_reader_poll_credential(&credential);
 
             if (pn532_err == ESP_ERR_TIMEOUT) {
                 pn532_err = ESP_OK;
@@ -465,26 +469,61 @@ static void gate_main_task(void *arg)
                 ESP_LOGW(TAG, "PN532 poll error: %s", esp_err_to_name(pn532_err));
             }
 
-            if (card_present && uid_hex[0] != '\0') {
+            if (credential.present && credential.credential_value[0] != '\0') {
                 card_absent_since_us = 0;
-                if (!card_latched || strcmp(uid_hex, latched_uid) != 0) {
+                bool hce_departure_fallback = credential.iso_dep &&
+                    strcmp(credential.credential_type, "CARD_UID") == 0 &&
+                    card_latched && strcmp(latched_type, "PHONE_HCE") == 0;
+                if (hce_departure_fallback) {
+                    ESP_LOGI(TAG,
+                             "Ignoring ISO-DEP UID fallback while PHONE_HCE target is leaving: UID=%s",
+                             credential.credential_value);
+                } else if (!card_latched ||
+                    strcmp(credential.credential_type, latched_type) != 0 ||
+                    strcmp(credential.credential_value, latched_value) != 0) {
                     card_latched = true;
-                    strlcpy(latched_uid, uid_hex, sizeof(latched_uid));
-                    ESP_LOGI(TAG, "Card detected UID=%s", uid_hex);
-                    memset(&s_card_result, 0, sizeof(s_card_result));
-                    esp_err_t post_err = gateway_client_post_access_card(uid_hex, &s_card_result);
-                    display_ui_show_gate_result(&s_card_result, post_err == ESP_OK);
-                    page = GATE_PAGE_RESULT;
-                    page_deadline_us = esp_timer_get_time() + (int64_t)SPS_RESULT_PAGE_TIMEOUT_MS * 1000;
-                    auth_terminal_shown = true;
-                    qr_auth_pending = false;
+                    strlcpy(latched_type, credential.credential_type, sizeof(latched_type));
+                    strlcpy(latched_value, credential.credential_value, sizeof(latched_value));
+                    if (strcmp(credential.credential_type, "CARD_UID") == 0) {
+                        ESP_LOGI(TAG, "Card detected UID=%s", credential.credential_value);
+                    }
+                    int64_t submit_now_us = esp_timer_get_time();
+                    bool duplicate = strcmp(credential.credential_type, last_submitted_type) == 0 &&
+                                     strcmp(credential.credential_value, last_submitted_value) == 0 &&
+                                     (submit_now_us - last_submit_us) / 1000 < SPS_CARD_DEBOUNCE_MS;
+                    if (duplicate) {
+                        ESP_LOGI(TAG, "Credential suppressed by %dms cooldown: type=%s value=%s",
+                                 SPS_CARD_DEBOUNCE_MS, credential.credential_type,
+                                 credential.credential_value);
+                    } else {
+                        strlcpy(last_submitted_type, credential.credential_type,
+                                sizeof(last_submitted_type));
+                        strlcpy(last_submitted_value, credential.credential_value,
+                                sizeof(last_submitted_value));
+                        last_submit_us = submit_now_us;
+                        memset(&s_card_result, 0, sizeof(s_card_result));
+                        esp_err_t post_err = gateway_client_post_access_credential(
+                            credential.credential_type, credential.credential_value, &s_card_result);
+                        if (post_err != ESP_OK) {
+                            ESP_LOGE(TAG, "Gateway timeout/error: %s", esp_err_to_name(post_err));
+                            display_ui_show_gateway_timeout();
+                        } else {
+                            display_ui_show_gate_result(&s_card_result, true);
+                        }
+                        page = GATE_PAGE_RESULT;
+                        page_deadline_us = esp_timer_get_time() +
+                            (int64_t)SPS_RESULT_PAGE_TIMEOUT_MS * 1000;
+                        auth_terminal_shown = true;
+                        qr_auth_pending = false;
+                    }
                 }
             } else if (card_latched) {
                 int64_t poll_time_us = esp_timer_get_time();
                 if (card_absent_since_us == 0) card_absent_since_us = poll_time_us;
                 if ((poll_time_us - card_absent_since_us) / 1000 >= SPS_CARD_REMOVE_CONFIRM_MS) {
                     card_latched = false;
-                    latched_uid[0] = '\0';
+                    latched_type[0] = '\0';
+                    latched_value[0] = '\0';
                     card_absent_since_us = 0;
                     ESP_LOGI(TAG, "Card removed for %dms; reader re-armed",
                              SPS_CARD_REMOVE_CONFIRM_MS);

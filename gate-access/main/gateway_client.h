@@ -28,5 +28,8 @@ typedef struct {
 } gateway_qr_session_t;
 
 esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_result_t *result);
+esp_err_t gateway_client_post_access_credential(const char *credential_type,
+                                                const char *credential_value,
+                                                gateway_access_result_t *result);
 esp_err_t gateway_client_fetch_qr_session(gateway_qr_session_t *result);
 esp_err_t gateway_client_poll_auth_result(gateway_access_result_t *result);

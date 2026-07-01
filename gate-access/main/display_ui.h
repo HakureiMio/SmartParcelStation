@@ -11,6 +11,7 @@ esp_err_t display_ui_show_card_id_numeric(const char *uid_hex);
 esp_err_t display_ui_show_qr(const char *payload);
 esp_err_t display_ui_show_main_menu(void);
 esp_err_t display_ui_show_gate_result(const gateway_access_result_t *result, bool request_ok);
+esp_err_t display_ui_show_gateway_timeout(void);
 void display_ui_show_gate_state(const char *state, const gateway_access_result_t *result);
 void display_ui_show_booting(void);
 void display_ui_show_network_status(const char *text);

@@ -97,6 +97,7 @@
 #define SPS_PN532_RST_GPIO          GPIO_NUM_NC
 #define SPS_CARD_DEBOUNCE_MS        3000
 #define SPS_CARD_POLL_INTERVAL_MS   100
+#define SPS_HCE_AID_HEX             "F0010203040506"
 
 #define SPS_HTTP_RESPONSE_MAX       2048
 

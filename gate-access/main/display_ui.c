@@ -407,6 +407,7 @@ static void draw_ascii_text(const char *text, int x, int y, int scale,
         for (int row = 0; row < 7; ++row) {
             uint8_t bits = rows != NULL ? rows[row] : (ch == '-' && row == 3 ? 0x1F : 0);
             if (ch == '.' && row == 6) bits = 0x04;
+            if (ch == '_' && row == 6) bits = 0x1F;
             if (ch == '/' && row >= 1 && row <= 5) bits = (uint8_t)(1U << (6 - row));
             for (int col = 0; col < 5; ++col) if (bits & (1U << (4 - col))) {
                 fill_rect(x + i * 6 * scale + col * scale, y + row * scale,
@@ -836,6 +837,8 @@ esp_err_t display_ui_show_gate_result(const gateway_access_result_t *result, boo
         shown[first_len] = '\0';
         draw_ascii_text(shown, 38, 425, 3, 24, 0x1082);
         if (second[0]) draw_ascii_text(second, 38, 475, 3, 24, 0x1082);
+    } else if (request_ok && result != NULL && result->reason[0] != '\0') {
+        draw_ascii_text(result->reason, 24, 350, 3, 24, 0xFFFF);
     }
 
     esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
@@ -849,6 +852,20 @@ esp_err_t display_ui_show_gate_result(const gateway_access_result_t *result, boo
              result != NULL ? result->shelves : "",
              result != NULL ? result->parcel_codes : "",
              result != NULL ? result->reason : "");
+    return err;
+}
+
+esp_err_t display_ui_show_gateway_timeout(void)
+{
+    ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "LCD is not initialized");
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
+    fill_color_buffer(0xFFE0);
+    draw_ascii_text("GATEWAY TIMEOUT", 60, 290, 4, 15, 0x0000);
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
+                                               SPS_DISPLAY_HEIGHT, s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
+    ESP_LOGW(TAG, "Gateway timeout displayed");
     return err;
 }
 

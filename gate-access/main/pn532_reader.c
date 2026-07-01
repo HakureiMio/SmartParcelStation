@@ -33,6 +33,7 @@ static const uint8_t PN532_WAKE[] = {0x55, 0x55, 0x00, 0x00, 0x00, 0x00};
 #define PN532_CMD_GET_FIRMWARE  0x02
 #define PN532_CMD_SAM_CONFIG    0x14
 #define PN532_CMD_IN_LIST       0x4A
+#define PN532_CMD_IN_DATA_EXCHANGE 0x40
 
 static const uint8_t PN532_ACK[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
 
@@ -202,11 +203,11 @@ static esp_err_t pn532_read_response(uint8_t expected_cmd, uint8_t *payload, siz
     }
 
     size_t len = header[0];
-    if (len < 2 || len + 2 > 96) {
+    if (len < 2 || len + 2 > 192) {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t body[96] = {0};
+    uint8_t body[192] = {0};
     ESP_RETURN_ON_ERROR(uart_read_exact(body, len + 2, 200), TAG,
                         "PN532 response body incomplete");
     if (body[0] != PN532_PN532_TO_HOST || body[1] != (uint8_t)(expected_cmd + 1)) {
@@ -346,6 +347,118 @@ esp_err_t pn532_reader_init(void)
     }
 
     ESP_LOGI(TAG, "PN532 init ok");
+    return ESP_OK;
+}
+
+static bool hce_payload_value(const char *payload, const char *key,
+                              char *value, size_t value_size)
+{
+    const char *start = strstr(payload, key);
+    if (start == NULL) return false;
+    start += strlen(key);
+    const char *end = strchr(start, '|');
+    size_t length = end != NULL ? (size_t)(end - start) : strlen(start);
+    if (length == 0 || length >= value_size) return false;
+    memcpy(value, start, length);
+    value[length] = '\0';
+    return true;
+}
+
+static esp_err_t pn532_try_hce(uint8_t target_number,
+                               char *credential_type, size_t type_size,
+                               char *credential_value, size_t value_size)
+{
+    static const uint8_t select_aid[] = {
+        0x00, 0xA4, 0x04, 0x00, 0x07,
+        0xF0, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00,
+    };
+    uint8_t args[1 + sizeof(select_aid)] = {0};
+    uint8_t response[160] = {0};
+    size_t response_len = 0;
+    args[0] = target_number;
+    memcpy(&args[1], select_aid, sizeof(select_aid));
+
+    ESP_LOGI(TAG, "HCE target detected");
+    ESP_LOGI(TAG, "SELECT AID sent: %s", SPS_HCE_AID_HEX);
+    esp_err_t err = pn532_command(PN532_CMD_IN_DATA_EXCHANGE, args, sizeof(args),
+                                  response, sizeof(response), &response_len);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "HCE APDU timeout/error: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, response, response_len, ESP_LOG_INFO);
+    if (response_len < 3 || (response[0] & 0x3F) != 0) {
+        ESP_LOGW(TAG, "HCE InDataExchange status invalid: len=%u status=0x%02X",
+                 (unsigned)response_len, response_len ? response[0] : 0xFF);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    if (response[response_len - 2] != 0x90 || response[response_len - 1] != 0x00) {
+        ESP_LOGW(TAG, "HCE SELECT AID rejected: SW=%02X%02X",
+                 response[response_len - 2], response[response_len - 1]);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    size_t text_len = response_len - 3; /* PN532 status + APDU 90 00 */
+    if (text_len == 0 || text_len >= 160) return ESP_ERR_INVALID_SIZE;
+    char text[160];
+    for (size_t i = 0; i < text_len; ++i) {
+        if (response[i + 1] < 0x20 || response[i + 1] > 0x7E) {
+            ESP_LOGW(TAG, "HCE payload contains non-ASCII data");
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        text[i] = (char)response[i + 1];
+    }
+    text[text_len] = '\0';
+    ESP_LOGI(TAG, "HCE response raw=%s", text);
+    if (strncmp(text, "SPSHCE1|", 8) != 0 ||
+        !hce_payload_value(text, "credential_type=", credential_type, type_size) ||
+        !hce_payload_value(text, "credential_value=", credential_value, value_size) ||
+        strcmp(credential_type, "PHONE_HCE") != 0) {
+        ESP_LOGW(TAG, "HCE payload format invalid");
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    ESP_LOGI(TAG, "HCE credential_type=%s credential_value=%s",
+             credential_type, credential_value);
+    return ESP_OK;
+}
+
+esp_err_t pn532_reader_poll_credential(pn532_credential_t *credential)
+{
+    if (credential == NULL) return ESP_ERR_INVALID_ARG;
+    memset(credential, 0, sizeof(*credential));
+
+    uint8_t args[] = {0x01, 0x00};
+    uint8_t payload[64] = {0};
+    size_t payload_len = 0;
+    esp_err_t err = pn532_command(PN532_CMD_IN_LIST, args, sizeof(args),
+                                  payload, sizeof(payload), &payload_len);
+    if (err == ESP_ERR_TIMEOUT) return ESP_OK;
+    if (err != ESP_OK) return err;
+    if (payload_len < 7 || payload[0] == 0) return ESP_OK;
+
+    uint8_t target_number = payload[1];
+    uint8_t sel_res = payload[4];
+    uint8_t uid_len = payload[5];
+    if (uid_len == 0 || uid_len > 10 || 6U + uid_len > payload_len) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    credential->present = true;
+    credential->iso_dep = (sel_res & 0x20) != 0;
+    uid_to_hex(&payload[6], uid_len, credential->uid_hex, sizeof(credential->uid_hex));
+
+    if (credential->iso_dep) {
+        err = pn532_try_hce(target_number,
+                            credential->credential_type, sizeof(credential->credential_type),
+                            credential->credential_value, sizeof(credential->credential_value));
+        if (err == ESP_OK) {
+            credential->hce = true;
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "HCE APDU failed; falling back to target UID=%s", credential->uid_hex);
+    }
+
+    strlcpy(credential->credential_type, "CARD_UID", sizeof(credential->credential_type));
+    strlcpy(credential->credential_value, credential->uid_hex, sizeof(credential->credential_value));
     return ESP_OK;
 }
 
