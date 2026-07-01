@@ -13,6 +13,10 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.schemas.schemas import (
+    AccessCredentialBindIn,
+    AccessCredentialDisableIn,
+    AccessCredentialOut,
+    AccessCredentialReportLostIn,
     AuthLoginIn,
     AuthPlaceholderIn,
     AuthPlaceholderOut,
@@ -27,7 +31,12 @@ from app.schemas.schemas import (
     GatewayRegistrationTokenOut,
     GatewayRegisterIn,
     GatewaySyncPullOut,
+    GateAuthConfirmOut,
+    GateNfcConfirmIn,
+    GateQrConfirmIn,
     HealthOut,
+    CardBindOut,
+    DemoDataOut,
     NotificationOut,
     ParcelCreate,
     ParcelOut,
@@ -112,6 +121,11 @@ async def patch_user(user_id: int, payload: UserPatch, _: object = Depends(get_c
 @router.post('/dev/default-users', response_model=list[UserOut])
 async def ensure_default_users(_: object = Depends(get_current_server_admin_or_bootstrap), db: AsyncSession = Depends(get_db)):
     return await services.ensure_default_users(db)
+
+
+@router.post('/dev/demo-data', response_model=DemoDataOut)
+async def demo_data(_: object = Depends(get_current_server_admin_or_bootstrap), db: AsyncSession = Depends(get_db)):
+    return DemoDataOut(**await services.ensure_demo_data(db))
 
 
 @router.post('/gateways/register', response_model=GatewayOut)
@@ -335,7 +349,7 @@ async def patch_parcel_status(parcel_id: int, payload: ParcelStatusPatch, _: obj
 
 
 @router.post('/pickup/confirm', response_model=PickupEventOut)
-async def pickup_confirm(payload: PickupConfirmIn, current_user=Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
+async def pickup_confirm(payload: PickupConfirmIn, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _, event, _ = await services.pickup_confirm(
         db,
         user_id=current_user.id,
@@ -345,6 +359,62 @@ async def pickup_confirm(payload: PickupConfirmIn, current_user=Depends(get_curr
         pickup_binding_id=payload.pickup_binding_id,
     )
     return event
+
+
+@router.post('/pickup/manual-confirm', response_model=PickupEventOut)
+@router.post('/pickup/nfc-confirm', response_model=PickupEventOut)
+async def user_pickup_confirm(payload: PickupConfirmIn, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    _, event, _ = await services.pickup_confirm(
+        db, user_id=current_user.id, event_id=payload.event_id, tag_id=payload.tag_id,
+        encrypted_token=payload.encrypted_token, pickup_binding_id=payload.pickup_binding_id,
+    )
+    return event
+
+
+@router.get('/users/me/parcels', response_model=list[ParcelOut])
+async def my_parcels(current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await services.list_user_pickup_list(db, current_user.id)
+
+
+@router.post('/users/me/cards/report-lost', response_model=AccessCredentialOut)
+async def report_lost_card(payload: AccessCredentialReportLostIn, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await services.report_card_lost(db, current_user, payload.card_id, payload.reason)
+
+
+@router.post('/staff/users/{user_id}/cards/bind', response_model=CardBindOut)
+async def bind_card(user_id: int, payload: AccessCredentialBindIn, current_user=Depends(get_current_staff_or_admin), db: AsyncSession = Depends(get_db)):
+    new_card, replaced = await services.bind_user_card(
+        db, user_id, payload.station_id, payload.credential_type, payload.credential_value, payload.reason, current_user
+    )
+    return CardBindOut(user_id=user_id, new_card=new_card, replaced_card=replaced)
+
+
+@router.get('/staff/users/{user_id}/cards', response_model=list[AccessCredentialOut])
+async def staff_user_cards(user_id: int, current_user=Depends(get_current_staff_or_admin), db: AsyncSession = Depends(get_db)):
+    return await services.list_user_cards(db, user_id, current_user)
+
+
+@router.post('/staff/users/{user_id}/cards/{card_id}/disable', response_model=AccessCredentialOut)
+async def disable_card(user_id: int, card_id: int, payload: AccessCredentialDisableIn, current_user=Depends(get_current_staff_or_admin), db: AsyncSession = Depends(get_db)):
+    return await services.disable_user_card(db, user_id, card_id, payload.reason, current_user)
+
+
+@router.post('/gate/auth/nfc-confirm', response_model=GateAuthConfirmOut)
+async def gate_nfc_confirm(payload: GateNfcConfirmIn, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.models.enums import GateAuthMethod
+    if payload.auth_method != GateAuthMethod.GATE_NFC_TAG:
+        raise HTTPException(status_code=400, detail='auth_method must be GATE_NFC_TAG')
+    result = await services.request_gate_auth(db, current_user, payload.model_dump())
+    return GateAuthConfirmOut(**result)
+
+
+@router.post('/gate/auth/qr-confirm', response_model=GateAuthConfirmOut)
+async def gate_qr_confirm(payload: GateQrConfirmIn, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.models.enums import GateAuthMethod
+    if payload.auth_method != GateAuthMethod.GATE_QR:
+        raise HTTPException(status_code=400, detail='auth_method must be GATE_QR')
+    result = await services.request_gate_auth(db, current_user, payload.model_dump())
+    return GateAuthConfirmOut(**result)
 
 
 @router.get('/users/{user_id}/pickup-list', response_model=list[ParcelOut])
@@ -381,4 +451,3 @@ async def list_sync_events(
 @router.post('/notifications/{notification_id}/read', response_model=NotificationOut)
 async def read_notification(notification_id: int, _: object = Depends(get_current_user_dev), db: AsyncSession = Depends(get_db)):
     return await services.mark_notification_read(db, notification_id)
-

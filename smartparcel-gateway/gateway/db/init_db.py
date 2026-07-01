@@ -70,6 +70,21 @@ def init_db() -> None:
                 if column not in audit_columns:
                     conn.execute(text(statement))
 
+        credential_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(local_nfc_credentials)"))}
+        credential_additions = {
+            "server_credential_id": "ALTER TABLE local_nfc_credentials ADD COLUMN server_credential_id VARCHAR(64)",
+            "credential_hash": "ALTER TABLE local_nfc_credentials ADD COLUMN credential_hash VARCHAR(128)",
+            "replaced_by_value": "ALTER TABLE local_nfc_credentials ADD COLUMN replaced_by_value VARCHAR(128)",
+            "lost_reported_at": "ALTER TABLE local_nfc_credentials ADD COLUMN lost_reported_at DATETIME",
+            "replaced_at": "ALTER TABLE local_nfc_credentials ADD COLUMN replaced_at DATETIME",
+            "disabled_at": "ALTER TABLE local_nfc_credentials ADD COLUMN disabled_at DATETIME",
+            "reason": "ALTER TABLE local_nfc_credentials ADD COLUMN reason VARCHAR(256)",
+            "last_synced_at": "ALTER TABLE local_nfc_credentials ADD COLUMN last_synced_at DATETIME",
+        }
+        for column, statement in credential_additions.items():
+            if column not in credential_columns:
+                conn.execute(text(statement))
+
 
 if __name__ == "__main__":
     init_db()

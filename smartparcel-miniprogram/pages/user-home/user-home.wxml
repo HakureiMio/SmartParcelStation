@@ -1,4 +1,6 @@
 <view class="page safe user-page">
+  <view class="section-title">用户服务</view>
+  <view class="grid"><button class="mini-action" bindtap="goGate">门禁认证</button><button class="mini-action" bindtap="goCards">我的门禁卡</button><button class="mini-action" bindtap="goParcels">待取包裹</button><button class="mini-action" bindtap="goNfc">NFC 确认取件</button></view>
   <input class="search-bar" value="{{searchText}}" bindinput="onSearch" placeholder="搜索快递编号" />
   <view class="glass-card pickup-hint" wx:if="{{hint}}">
     <view class="section-title">取件提示</view>

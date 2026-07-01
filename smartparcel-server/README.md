@@ -292,3 +292,33 @@ docker compose -f docker-compose.vps.yml down
 # 重启服务
 docker compose -f docker-compose.vps.yml up -d --build
 ```
+# 用户门禁凭证与补卡（阶段 1）
+
+演示账号为 `station_admin001 / 123456`（STAFF）和 `demo_user001 / 123456`（USER）。
+旧账号 `user001`、`staff001` 仅作历史兼容，初始化时会停用。自由注册保持关闭。
+
+服务端支持三种门禁识别入口：实体卡或手机 HCE 的 `CARD_UID`、手机读取门禁标签的
+`GATE_NFC_TAG`、小程序扫描门禁屏幕的 `GATE_QR`。后两种入口只创建
+`GATE_USER_AUTH_REQUESTED` 事件；server 不直接决定放行，最终由 gateway 判断。
+
+补卡时，STAFF 使用 Bearer token 调用绑定接口。系统把同用户、同站点原有 ACTIVE
+卡改为 `REPLACED`，保留历史并下发禁用事件，再创建新 ACTIVE 卡及 UPSERT 事件。
+报失会把 ACTIVE 卡改为 `LOST`。已经发放过的 UID（包括 LOST、REPLACED、DISABLED）
+不会重新绑定，避免旧卡恢复为可用凭证。
+
+初始化完整演示数据：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/dev/demo-data \
+  -H "X-Admin-Bootstrap-Token: change-me-local-only"
+```
+
+补办卡（先通过 `/api/v1/auth/login` 获取 STAFF token 和用户 ID）：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/staff/users/2/cards/bind \
+  -H "Authorization: Bearer $STAFF_TOKEN" -H "Content-Type: application/json" \
+  -d '{"station_id":1,"credential_type":"CARD_UID","credential_value":"CARD_UID_002","reason":"FIRST_BIND_OR_REPLACEMENT"}'
+```
+
+上述调用会令 `CARD_UID_001 -> REPLACED`、`CARD_UID_002 -> ACTIVE`。

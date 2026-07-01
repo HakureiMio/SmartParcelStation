@@ -15,7 +15,14 @@ Authentication:
 from __future__ import annotations
 
 import re
-from datetime import datetime
+import hashlib
+import hmac
+import json
+import secrets
+import time
+import uuid
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -24,8 +31,8 @@ from sqlalchemy import func, or_, select
 from gateway.core.config import get_settings
 from gateway.db.init_db import init_db
 from gateway.db.session import SessionLocal
-from gateway.local_api_auth import validate_local_session
-from gateway.models.entities import LocalTag, TagStatus
+from gateway.local_api_auth import validate_gate_reader_auth, validate_local_session
+from gateway.models.entities import GateAuthSession, GateAuthStatus, LocalTag, TagStatus
 from gateway.services.access_control_service import AccessControlService
 from gateway.services.ble import get_ble_tag_service
 from gateway.services.ble.adapter import RealBleCommandService
@@ -173,9 +180,11 @@ def local_health():
 @app.post("/local/gate/access-card")
 def gate_access_card(
     payload: GateAccessIn,
-    auth: dict = Depends(validate_local_session),
+    auth: dict = Depends(validate_gate_reader_auth),
 ):
     settings = get_settings()
+    if payload.reader_id != auth["reader_id"]:
+        raise HTTPException(status_code=403, detail="reader_id does not match authenticated reader")
     db = SessionLocal()
     try:
 
@@ -190,14 +199,97 @@ def gate_access_card(
             TaskService(db),
             ble_service,
             settings.station_id,
+            gateway_code=settings.gateway_code,
+            auth_result_ttl_seconds=settings.gate_auth_result_ttl_seconds,
         )
-        return service.handle_access_card(
+        result = service.handle_access_card(
             reader_id=payload.reader_id,
             credential_type=payload.credential_type,
             credential_value=payload.credential_value,
         )
+        gate_session = GateAuthSession(
+            session_id=result.get("pickup_session_id") or f"card_{uuid.uuid4().hex}",
+            auth_method="CARD_UID", reader_id=payload.reader_id, gateway_code=settings.gateway_code,
+            station_id=settings.station_id,
+            status=GateAuthStatus.GRANTED if result["access"] == "GRANTED" else GateAuthStatus.DENIED,
+            user_id=result.get("user_id"), pickup_count=result.get("pickup_count", 0),
+            parcel_codes_json=json.dumps([item["parcel_code"] for item in result.get("items", [])]),
+            shelves_json=json.dumps(result.get("shelves", [])), session_color=result.get("session_color"),
+            display_text=result.get("display_text", ""), reason=result.get("reason"), confirmed_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(seconds=settings.gate_auth_result_ttl_seconds),
+        )
+        db.add(gate_session); db.commit()
+        return result
     finally:
         db.close()
+
+
+def _gate_session_result(row: GateAuthSession) -> dict:
+    if row.status == GateAuthStatus.PENDING and row.expires_at and row.expires_at < datetime.utcnow():
+        row.status = GateAuthStatus.EXPIRED
+        row.reason, row.display_text = "AUTH_RESULT_EXPIRED", "认证结果已过期"
+    return {
+        "ok": True, "status": row.status.value, "auth_method": row.auth_method,
+        "reader_id": row.reader_id, "user_id": row.user_id, "pickup_count": row.pickup_count,
+        "parcel_codes": json.loads(row.parcel_codes_json or "[]"), "shelves": json.loads(row.shelves_json or "[]"),
+        "session_color": row.session_color, "display_text": row.display_text, "reason": row.reason,
+        "session_id": row.session_id,
+    }
+
+
+@app.get("/local/gate/qr-session")
+def gate_qr_session(reader_id: str, auth: dict = Depends(validate_gate_reader_auth)):
+    if reader_id != auth["reader_id"]: raise HTTPException(status_code=403, detail="reader_id mismatch")
+    settings = get_settings(); now = int(time.time()); expires = now + settings.gate_qr_ttl_seconds
+    session_id, nonce = f"qr_{uuid.uuid4().hex}", secrets.token_urlsafe(16)
+    params = {"v": "1", "gateway_code": settings.gateway_code, "reader_id": reader_id,
+              "station_id": settings.station_id, "session_id": session_id, "nonce": nonce, "expires_at": str(expires)}
+    signature = hmac.new(settings.gateway_secret.encode(), urlencode(params).encode(), hashlib.sha256).hexdigest()
+    params["signature"] = signature; qr_payload = "sps://gate-qr?" + urlencode(params)
+    db = SessionLocal()
+    try:
+        db.add(GateAuthSession(session_id=session_id, auth_method="GATE_QR", reader_id=reader_id,
+            gateway_code=settings.gateway_code, station_id=settings.station_id,
+            nonce_hash=hashlib.sha256(nonce.encode()).hexdigest(), challenge_payload=qr_payload,
+            status=GateAuthStatus.PENDING, expires_at=datetime.utcnow() + timedelta(seconds=settings.gate_qr_ttl_seconds)))
+        db.commit()
+    finally: db.close()
+    return {"ok": True, "auth_method": "GATE_QR", "session_id": session_id, "reader_id": reader_id,
+            "gateway_code": settings.gateway_code, "station_id": settings.station_id, "nonce": nonce,
+            "expires_at": expires, "qr_payload": qr_payload}
+
+
+@app.get("/local/gate/nfc-payload")
+def gate_nfc_payload(reader_id: str, auth: dict = Depends(validate_gate_reader_auth)):
+    if reader_id != auth["reader_id"]: raise HTTPException(status_code=403, detail="reader_id mismatch")
+    settings = get_settings()
+    params = {"v": "1", "gateway_code": settings.gateway_code, "reader_id": reader_id,
+              "station_id": settings.station_id, "gate_nfc_tag_id": settings.gate_nfc_tag_id}
+    return {"ok": True, "auth_method": "GATE_NFC_TAG", "reader_id": reader_id,
+            "gateway_code": settings.gateway_code, "station_id": settings.station_id,
+            "gate_nfc_tag_id": settings.gate_nfc_tag_id, "nfc_payload": "sps://gate-nfc?" + urlencode(params)}
+
+
+@app.get("/local/gate/auth-result")
+def gate_auth_result(reader_id: str, auth: dict = Depends(validate_gate_reader_auth)):
+    if reader_id != auth["reader_id"]: raise HTTPException(status_code=403, detail="reader_id mismatch")
+    db = SessionLocal()
+    try:
+        row = db.scalar(select(GateAuthSession).where(GateAuthSession.reader_id == reader_id).order_by(GateAuthSession.created_at.desc()))
+        if row is None: return {"ok": True, "status": "PENDING", "display_text": "请刷卡 / 扫码 / 手机 NFC"}
+        result = _gate_session_result(row); db.commit(); return result
+    finally: db.close()
+
+
+@app.get("/local/gate/auth-session/{session_id}/result")
+def gate_auth_session_result(session_id: str, auth: dict = Depends(validate_gate_reader_auth)):
+    db = SessionLocal()
+    try:
+        row = db.scalar(select(GateAuthSession).where(GateAuthSession.session_id == session_id,
+                                                       GateAuthSession.reader_id == auth["reader_id"]))
+        if row is None: raise HTTPException(status_code=404, detail="gate auth session not found")
+        result = _gate_session_result(row); db.commit(); return result
+    finally: db.close()
 
 
 @app.post("/local/tags/scan")

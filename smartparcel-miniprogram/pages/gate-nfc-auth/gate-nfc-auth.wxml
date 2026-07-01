@@ -1,0 +1,3 @@
+<view class="page safe"><view class="title">手机 NFC 开门</view><view class="subtitle">请用手机贴近门禁 NFC 标签</view>
+<button class="btn btn-primary" loading="{{submitting}}" bindtap="read">读取门禁 NFC 标签</button><view class="notice">{{statusText}}</view>
+<view class="glass-card"><view class="form-label">手动输入 payload（NFC 不可用时调试）</view><textarea class="input" value="{{raw}}" bindinput="input" placeholder="sps://gate-nfc?..."/><button class="btn btn-ghost" bindtap="submitInput">提交真实 server</button></view></view>

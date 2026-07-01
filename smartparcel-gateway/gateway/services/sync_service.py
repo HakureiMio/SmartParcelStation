@@ -10,10 +10,13 @@ from sqlalchemy.orm import Session
 
 from gateway.models.entities import (
     BindingStatus,
+    CredentialStatus,
+    CredentialType,
     EventSource,
     EventSyncStatus,
     LocalParcel,
     LocalParcelTagBinding,
+    LocalNfcCredential,
     LocalPickupEvent,
     LocalTag,
     PickupEventType,
@@ -36,6 +39,8 @@ class SyncService:
         # Compatible with the server's current sync contract: {"events": [...]}
         # while keeping backward compatibility with the old denormalized payload.
         if "events" in data and not any(k in data for k in ("parcels", "tags", "bindings")):
+            for event in data.get("events", []):
+                self.apply_sync_event(event.get("event_type", ""), event.get("payload_json") or {})
             self.db.commit()
             logger.info("sync pull done")
             return data
@@ -70,6 +75,111 @@ class SyncService:
         self.db.commit()
         logger.info("sync pull done")
         return data
+
+    def apply_sync_event(self, event_type: str, payload: dict) -> None:
+        kind = event_type.upper()
+        now = datetime.utcnow()
+        if kind == "USER_ACCESS_CREDENTIAL_UPSERT":
+            value = payload["credential_value"]
+            row = self.db.scalar(select(LocalNfcCredential).where(LocalNfcCredential.credential_value == value))
+            status = CredentialStatus(payload.get("status", "ACTIVE"))
+            if row is None:
+                row = LocalNfcCredential(
+                    server_credential_id=str(payload.get("id")) if payload.get("id") is not None else None,
+                    credential_type=CredentialType(payload.get("credential_type", "CARD_UID")),
+                    credential_value=value, user_id=str(payload["user_id"]),
+                    station_id=str(payload.get("station_id", self.station_id)), status=status,
+                    expires_at=self._parse_datetime(payload.get("expires_at")), last_synced_at=now,
+                )
+                self.db.add(row)
+            else:
+                # A terminal local card state is never resurrected by a stale UPSERT.
+                if row.status in {CredentialStatus.LOST, CredentialStatus.REPLACED, CredentialStatus.DISABLED} and status == CredentialStatus.ACTIVE:
+                    return
+                row.user_id, row.station_id, row.status = str(payload["user_id"]), str(payload.get("station_id", self.station_id)), status
+                row.expires_at, row.last_synced_at = self._parse_datetime(payload.get("expires_at")), now
+            return
+        if kind == "USER_ACCESS_CREDENTIAL_DISABLED":
+            row = self.db.scalar(select(LocalNfcCredential).where(LocalNfcCredential.credential_value == payload["credential_value"]))
+            if row:
+                row.status = CredentialStatus(payload.get("status", "DISABLED"))
+                row.reason, row.last_synced_at = payload.get("reason"), now
+                if row.status == CredentialStatus.REPLACED: row.replaced_at = now
+                elif row.status == CredentialStatus.LOST: row.lost_reported_at = now
+                else: row.disabled_at = now
+            return
+        if kind == "USER_ACCESS_CREDENTIAL_REPLACED":
+            old = payload.get("old_credential_value") or payload.get("credential_value")
+            new = payload.get("new_credential_value")
+            if old:
+                self.apply_sync_event("USER_ACCESS_CREDENTIAL_DISABLED", {**payload, "credential_value": old, "status": "REPLACED"})
+            if new:
+                self.apply_sync_event("USER_ACCESS_CREDENTIAL_UPSERT", {**payload, "credential_value": new, "status": "ACTIVE"})
+            self.enqueue_event_upload({"event_type": "GATE_CARD_REPLACED_APPLIED", "payload_json": {
+                "old_credential_hash": self._hash(old), "new_credential_hash": self._hash(new), "station_id": self.station_id,
+            }})
+            return
+        if kind == "PARCEL_UPSERT":
+            parcel_id = str(payload.get("server_parcel_id") or payload.get("parcel_id"))
+            row = self.db.scalar(select(LocalParcel).where(LocalParcel.server_parcel_id == parcel_id))
+            if row is None:
+                row = LocalParcel(server_parcel_id=parcel_id, parcel_code=payload["parcel_code"], station_id=str(payload.get("station_id", self.station_id)))
+                self.db.add(row)
+            for source, target in (("pickup_code", "pickup_code"), ("receiver_user_id", "receiver_user_id"), ("user_id", "receiver_user_id"), ("receiver_phone", "receiver_phone"), ("receiver_name_masked", "receiver_name_masked"), ("shelf_code", "shelf_code"), ("shelf", "shelf_code")):
+                if payload.get(source) is not None: setattr(row, target, str(payload[source]))
+            row.status = payload.get("status", row.status); row.local_updated_at = now
+            return
+        if kind == "PARCEL_TAG_BINDING_UPSERT":
+            parcel_id = str(payload.get("server_parcel_id") or payload.get("parcel_id"))
+            binding_id = payload.get("pickup_binding_id") or f"sync-{parcel_id}-{payload['tag_id']}"
+            row = self.db.scalar(select(LocalParcelTagBinding).where(LocalParcelTagBinding.pickup_binding_id == binding_id))
+            if row is None:
+                row = LocalParcelTagBinding(pickup_binding_id=binding_id, server_parcel_id=parcel_id, tag_id=payload["tag_id"], station_id=str(payload.get("station_id", self.station_id)))
+                self.db.add(row)
+            row.status = payload.get("status", "ACTIVE")
+            tag = self.db.scalar(select(LocalTag).where(LocalTag.tag_id == payload["tag_id"]))
+            if tag is None:
+                tag = LocalTag(tag_id=payload["tag_id"], station_id=str(payload.get("station_id", self.station_id)), encrypted_token=payload.get("encrypted_token", ""))
+                self.db.add(tag)
+            elif payload.get("encrypted_token") is not None: tag.encrypted_token = payload["encrypted_token"]
+            return
+        if kind == "PARCEL_PICKUP_CONFIRMED":
+            parcel_id = str(payload.get("server_parcel_id") or payload.get("parcel_id"))
+            parcel = self.db.scalar(select(LocalParcel).where(LocalParcel.server_parcel_id == parcel_id))
+            if parcel: parcel.status = "PICKED_UP"
+            bindings = list(self.db.scalars(select(LocalParcelTagBinding).where(LocalParcelTagBinding.server_parcel_id == parcel_id)))
+            for binding in bindings:
+                if binding.status == BindingStatus.ACTIVE:
+                    try:
+                        from gateway.services.ble.adapter import RealBleCommandService
+                        RealBleCommandService().tag_stop(binding.tag_id, binding.last_wake_session_id)
+                    except Exception as exc:
+                        logger.warning("failed to stop picked-up tag {}: {}", binding.tag_id, exc)
+                binding.status, binding.released_at, binding.release_reason = BindingStatus.RELEASED, now, "SERVER_PICKUP_CONFIRMED"
+                tag = self.db.scalar(select(LocalTag).where(LocalTag.tag_id == binding.tag_id))
+                if tag: tag.status = TagStatus.IDLE
+            return
+        if kind == "GATE_USER_AUTH_REQUESTED":
+            from gateway.services.access_control_service import AccessControlService
+            from gateway.services.ble.adapter import RealBleCommandService
+            from gateway.services.task_service import TaskService
+            service = AccessControlService(
+                self.db, self, TaskService(self.db), RealBleCommandService(), self.station_id,
+                gateway_code=self.client.settings.gateway_code,
+                auth_result_ttl_seconds=getattr(self.client.settings, "gate_auth_result_ttl_seconds", 15),
+            )
+            service.handle_gate_auth_by_user(payload["auth_method"], payload["reader_id"], str(payload["user_id"]), payload.get("request_id"), payload.get("session_id"))
+
+    @staticmethod
+    def _parse_datetime(value):
+        if not value: return None
+        if isinstance(value, datetime): return value
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+
+    @staticmethod
+    def _hash(value):
+        import hashlib
+        return hashlib.sha256(str(value or "").encode()).hexdigest()
 
     def enqueue_event_upload(self, payload: dict) -> SyncQueue:
         row = SyncQueue(

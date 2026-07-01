@@ -10,6 +10,7 @@ Authentication and authorization for the gateway local API.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -151,3 +152,18 @@ def validate_local_session(request: Request) -> dict:
         return {"authenticated": True, "role": session.role, "session_id": str(session.id)}
     finally:
         db.close()
+
+
+def validate_gate_reader_auth(request: Request) -> dict:
+    settings = get_settings()
+    if settings.is_unbound:
+        raise HTTPException(status_code=403, detail="Gateway is unbound")
+    reader_id = request.headers.get("X-Gate-Reader-Id", "")
+    token = request.headers.get("X-Gate-Reader-Token", "")
+    if not settings.gate_reader_auth_enabled:
+        return {"authenticated": False, "reader_id": reader_id or settings.gate_reader_id}
+    if reader_id != settings.gate_reader_id or not token or not hmac.compare_digest(token, settings.gate_reader_token):
+        _write_audit("gate_reader_auth_failed", source_ip=request.client.host if request.client else None,
+                     reason="invalid_reader_credentials", request_path=request.url.path)
+        raise HTTPException(status_code=401, detail="Invalid gate reader credentials")
+    return {"authenticated": True, "reader_id": reader_id}

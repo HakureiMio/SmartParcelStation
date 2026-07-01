@@ -46,11 +46,15 @@ class BindingStatus(str, enum.Enum):
 class CredentialType(str, enum.Enum):
     CARD_UID = "CARD_UID"
     PHONE_HCE = "PHONE_HCE"
+    GATE_NFC_TAG = "GATE_NFC_TAG"
+    GATE_QR = "GATE_QR"
     TOKEN = "TOKEN"
 
 
 class CredentialStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
+    LOST = "LOST"
+    REPLACED = "REPLACED"
     DISABLED = "DISABLED"
     EXPIRED = "EXPIRED"
 
@@ -197,6 +201,14 @@ class LocalNfcCredential(Base):
     station_id: Mapped[str] = mapped_column(String(64), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[CredentialStatus] = mapped_column(Enum(CredentialStatus), default=CredentialStatus.ACTIVE)
+    server_credential_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    credential_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    replaced_by_value: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lost_reported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -234,6 +246,40 @@ class LocalPickupSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class GateAuthStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    GRANTED = "GRANTED"
+    DENIED = "DENIED"
+    EXPIRED = "EXPIRED"
+    CONSUMED = "CONSUMED"
+
+
+class GateAuthSession(Base):
+    __tablename__ = "gate_auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    auth_method: Mapped[str] = mapped_column(String(32))
+    reader_id: Mapped[str] = mapped_column(String(64), index=True)
+    gateway_code: Mapped[str] = mapped_column(String(64))
+    station_id: Mapped[str] = mapped_column(String(64), index=True)
+    nonce_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    challenge_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[GateAuthStatus] = mapped_column(Enum(GateAuthStatus), default=GateAuthStatus.PENDING)
+    user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pickup_count: Mapped[int] = mapped_column(Integer, default=0)
+    parcel_codes_json: Mapped[str] = mapped_column(Text, default="[]")
+    shelves_json: Mapped[str] = mapped_column(Text, default="[]")
+    session_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    display_text: Mapped[str] = mapped_column(Text, default="请刷卡 / 扫码 / 手机 NFC")
+    reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    server_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
 
 class GatewayTask(Base):

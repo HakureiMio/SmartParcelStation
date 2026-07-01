@@ -32,13 +32,65 @@ function checkNfcAvailable() {
  */
 function readTag() {
   const available = checkNfcAvailable()
-  if (!available.available) {
-    return Promise.resolve({ ok: false, reason: available.reason })
-  }
-  return Promise.resolve({
-    ok: false,
-    reason: '真实 NFC 读取尚未接入，请使用真机 NFC 能力或手动输入标签信息'
+  if (!available.available) return Promise.resolve({ ok: false, reason: available.reason })
+  return new Promise((resolve) => {
+    const adapter = wx.getNFCAdapter()
+    const ndef = adapter.getNdef ? adapter.getNdef() : null
+    if (!ndef || !ndef.onNdefMessage) {
+      resolve({ ok: false, reason: '当前环境无法读取 NFC，请使用真机或手动输入 NFC payload。' })
+      return
+    }
+    let done = false
+    const finish = (value) => { if (!done) { done = true; resolve(value) } }
+    ndef.onNdefMessage((message) => {
+      const record = (message.message || [])[0] || {}
+      const raw = ndefRecordToText(record)
+      const parsed = parseSpsPayload(raw)
+      finish(parsed.ok ? { ok: true, raw, parsed: parsed.parsed } : parsed)
+    })
+    adapter.startDiscovery({ fail: (err) => finish({ ok: false, reason: err.errMsg || 'NFC 读取启动失败' }) })
+    setTimeout(() => finish({ ok: false, reason: 'NFC 读取超时，请重试或手动输入 payload。' }), 15000)
   })
+}
+
+function arrayBufferToUtf8(buffer) {
+  if (!buffer) return ''
+  const bytes = new Uint8Array(buffer)
+  let encoded = ''
+  bytes.forEach((byte) => { encoded += `%${byte.toString(16).padStart(2, '0')}` })
+  try { return decodeURIComponent(encoded) } catch (_) { return String.fromCharCode.apply(null, bytes) }
+}
+
+function ndefRecordToText(record) {
+  const bytes = new Uint8Array(record.payload || new ArrayBuffer(0))
+  const type = arrayBufferToUtf8(record.type || new ArrayBuffer(0))
+  let offset = 0
+  if (type === 'T' && bytes.length) offset = 1 + (bytes[0] & 0x3f)
+  if (type === 'U' && bytes.length && bytes[0] === 0) offset = 1
+  return arrayBufferToUtf8(bytes.slice(offset).buffer)
+}
+
+function parseQueryUri(raw, prefix, type) {
+  if (typeof raw !== 'string' || raw.indexOf(prefix) !== 0) return null
+  const parsed = { type }
+  ;(raw.split('?')[1] || '').split('&').forEach((pair) => {
+    const index = pair.indexOf('=')
+    const key = index >= 0 ? pair.slice(0, index) : pair
+    const value = index >= 0 ? pair.slice(index + 1) : ''
+    if (key) parsed[decodeURIComponent(key)] = decodeURIComponent(value)
+  })
+  return parsed
+}
+
+function parseSpsPayload(raw) {
+  if (!raw) return { ok: false, reason: 'payload 为空' }
+  if (typeof raw !== 'string') return { ok: true, parsed: raw }
+  try { return { ok: true, parsed: JSON.parse(raw) } } catch (_) {}
+  const parsed = parseQueryUri(raw, 'sps://gate-qr?', 'SPS_GATE_QR') ||
+    parseQueryUri(raw, 'sps://gate-nfc?', 'SPS_GATE_NFC') ||
+    parseQueryUri(raw, 'sps://pickup?', 'SPS_PICKUP_TAG') ||
+    parseQueryUri(raw, 'sps://tag?', 'SPS_SMART_TAG')
+  return parsed ? { ok: true, parsed } : { ok: false, reason: '无法解析 SPS payload' }
 }
 
 /**
@@ -66,6 +118,8 @@ function writeTag(payload) {
  * Parse a raw NFC payload string (JSON or sps://tag? URI format).
  */
 function parseTagPayload(raw) {
+  const modern = parseSpsPayload(raw)
+  if (modern.ok) return modern
   if (!raw) return { ok: false, reason: '内容为空' }
   try {
     return { ok: true, parsed: typeof raw === 'string' ? JSON.parse(raw) : raw }
@@ -83,4 +137,4 @@ function parseTagPayload(raw) {
   return { ok: false, reason: '无法解析 NFC 标签内容' }
 }
 
-module.exports = { checkNfcAvailable, readTag, writeTag, parseTagPayload }
+module.exports = { checkNfcAvailable, readTag, writeTag, parseTagPayload, parseSpsPayload, arrayBufferToUtf8, ndefRecordToText }

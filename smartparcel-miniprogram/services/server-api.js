@@ -64,6 +64,14 @@ function getUserParcels(userId) {
   })
 }
 
+function gateQrConfirm(payload) { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/gate/auth/qr-confirm', method: 'POST', data: payload, headers: authHeaders() }) }
+function gateNfcConfirm(payload) { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/gate/auth/nfc-confirm', method: 'POST', data: payload, headers: authHeaders() }) }
+function getMyCards() { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/users/me/cards', headers: authHeaders() }) }
+function reportMyCardLost(payload) { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/users/me/cards/report-lost', method: 'POST', data: payload, headers: authHeaders() }) }
+function getMyParcels() { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/users/me/parcels', headers: authHeaders() }) }
+function manualConfirmPickup(payload) { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/pickup/manual-confirm', method: 'POST', data: payload, headers: authHeaders() }) }
+function nfcConfirmPickup(payload) { return request({ baseUrl: CONFIG.serverBaseUrl, url: '/pickup/nfc-confirm', method: 'POST', data: payload, headers: authHeaders() }) }
+
 function getUserNotifications(userId) {
   return request({
     baseUrl: CONFIG.serverBaseUrl,
@@ -194,6 +202,13 @@ function createGatewayRegistrationToken(payload) {
 module.exports = {
   getServerHealth,
   getUserParcels,
+  gateQrConfirm,
+  gateNfcConfirm,
+  getMyCards,
+  reportMyCardLost,
+  getMyParcels,
+  manualConfirmPickup,
+  nfcConfirmPickup,
   getUserNotifications,
   getPickupStatus,
   confirmTagNfcFastPickup,

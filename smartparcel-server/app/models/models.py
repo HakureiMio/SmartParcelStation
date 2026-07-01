@@ -5,6 +5,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import (
+    AccessCredentialStatus,
+    AccessCredentialType,
     EventSource,
     GatewayFactoryDeviceStatus,
     GatewayRegistrationTokenStatus,
@@ -43,6 +45,27 @@ class User(Base, TimestampMixin):
     pickup_level: Mapped[str] = mapped_column(String(32), default='NORMAL', nullable=False)
     trusted_pickup_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class UserAccessCredential(Base, TimestampMixin):
+    __tablename__ = 'user_access_credentials'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False, index=True)
+    station_id: Mapped[int] = mapped_column(ForeignKey('stations.id'), nullable=False, index=True)
+    credential_type: Mapped[AccessCredentialType] = mapped_column(Enum(AccessCredentialType), nullable=False)
+    credential_value: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    credential_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[AccessCredentialStatus] = mapped_column(
+        Enum(AccessCredentialStatus), default=AccessCredentialStatus.ACTIVE, nullable=False
+    )
+    replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey('user_access_credentials.id'), nullable=True)
+    lost_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
 
 
 class Station(Base, TimestampMixin):

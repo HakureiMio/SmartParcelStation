@@ -139,3 +139,19 @@ const CONFIG = {
 - 用户端全部接口的真实 server 数据闭环。
 - 门禁刷卡流程尚未完全迁移到 real BLE。
 - NFC 真实读写尚未接入真机回调。
+# 阶段 3：用户门禁认证与取件确认
+
+用户首页提供“门禁认证、我的门禁卡、待取包裹、NFC 确认取件”四个入口。
+
+- 实体卡或手机模拟卡直接在门禁读卡区使用，不经过小程序。
+- `GATE_QR` 扫描 `sps://gate-qr?...`，使用用户 Bearer token 向 server 提交请求。
+- `GATE_NFC_TAG` 读取门禁 NFC 标签 `sps://gate-nfc?...` 后向 server 提交请求。
+- 小程序不显示“已放行”；最终结果以门禁屏幕和 gateway 本地判断为准。
+- 包裹 NFC 取件读取的是 `sps://pickup?...` 包裹标签，不是门禁 NFC 标签。
+
+NFC 使用微信真机 NDEF 回调。环境不支持、启动失败或超时时只显示失败信息，并提供手动
+payload 输入；手动输入仍调用真实 server，不产生 mock 成功。
+
+用户可以报失 ACTIVE 卡，补办新卡必须联系站点员工。补办完成后旧卡不可再开门。
+门禁 QR/NFC 请求只使用用户 Bearer token，不使用 gateway local session、reader token，
+也不保存 `gateway_secret`、`reader_token` 或 server secret。

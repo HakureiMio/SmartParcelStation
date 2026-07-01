@@ -21,6 +21,9 @@ function statusText(status) {
 
 Page({
   data:{ userId:'', parcels:[], filteredParcels:[], hint:null, searchText:'', shelvesText:'' },
+  goGate(){ wx.navigateTo({ url:'/pages/gate-auth/gate-auth' }) },
+  goCards(){ wx.navigateTo({ url:'/pages/user-card-manage/user-card-manage' }) },
+  goParcels(){ wx.navigateTo({ url:'/pages/user-parcels/user-parcels' }) },
   onLoad(){ const session = authService.requireRole('client'); if (!session) return; this.setData({ userId:session.userId }); this.loadParcels() },
   loadParcels(){ Promise.all([serverApi.getUserParcels(this.data.userId), serverApi.getPickupStatus(this.data.userId)]).then(([p,s])=>{ const hint=(s.data||{}).gateway_hint || null; const parcels=(p.data||[]).map((item)=>{ const colorName=normalizeColorName(item, hint); return { ...item, colorName, colorClass: colorClass(colorName), statusText: statusText(item.status) } }); this.setData({ parcels, filteredParcels:parcels, hint, shelvesText: hint && hint.shelves ? hint.shelves.join('、') : '' }) }) },
   onSearch(e){ const text=e.detail.value.trim(); const lower=text.toLowerCase(); const filtered=this.data.parcels.filter((item)=>!lower || item.parcel_code.toLowerCase().indexOf(lower)>=0 || String(item.shelf_code || '').toLowerCase().indexOf(lower)>=0); this.setData({ searchText:text, filteredParcels:filtered }) },

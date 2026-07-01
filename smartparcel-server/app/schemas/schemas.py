@@ -4,8 +4,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import (
+    AccessCredentialStatus,
+    AccessCredentialType,
     EventSource,
     GatewayFactoryDeviceStatus,
+    GateAuthMethod,
     GatewayRegistrationTokenStatus,
     NotificationStatus,
     NotificationType,
@@ -247,6 +250,86 @@ class PickupConfirmIn(BaseModel):
     tag_id: str
     encrypted_token: str
     pickup_binding_id: str
+
+
+class AccessCredentialBindIn(BaseModel):
+    station_id: int
+    credential_type: AccessCredentialType = AccessCredentialType.CARD_UID
+    credential_value: str = Field(min_length=1, max_length=255)
+    reason: str | None = Field(default=None, max_length=255)
+
+    @field_validator('credential_value')
+    @classmethod
+    def normalize_credential_value(cls, value: str) -> str:
+        return value.strip().upper()
+
+
+class AccessCredentialOut(ORMBase):
+    id: int
+    user_id: int
+    station_id: int
+    credential_type: AccessCredentialType
+    credential_value: str
+    status: AccessCredentialStatus
+    replaced_by_id: int | None
+    lost_reported_at: datetime | None
+    replaced_at: datetime | None
+    disabled_at: datetime | None
+    reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AccessCredentialDisableIn(BaseModel):
+    reason: str = Field(default='DISABLED_BY_STAFF', max_length=255)
+
+
+class AccessCredentialReportLostIn(BaseModel):
+    card_id: int
+    reason: str = Field(default='USER_REPORTED_LOST', max_length=255)
+
+
+class CardBindOut(BaseModel):
+    ok: bool = True
+    user_id: int
+    new_card: AccessCredentialOut
+    replaced_card: AccessCredentialOut | None = None
+
+
+class GateNfcConfirmIn(BaseModel):
+    auth_method: GateAuthMethod
+    gateway_code: str = Field(pattern=r'^[A-Za-z0-9_-]{2,64}$')
+    reader_id: str = Field(pattern=r'^[A-Za-z0-9_-]{2,64}$')
+    station_id: int
+    gate_nfc_tag_id: str = Field(min_length=1, max_length=128)
+
+
+class GateQrConfirmIn(BaseModel):
+    auth_method: GateAuthMethod
+    gateway_code: str = Field(pattern=r'^[A-Za-z0-9_-]{2,64}$')
+    reader_id: str = Field(pattern=r'^[A-Za-z0-9_-]{2,64}$')
+    station_id: int
+    session_id: str = Field(min_length=1, max_length=128)
+    nonce: str = Field(min_length=1, max_length=128)
+    expires_at: int
+    signature: str = Field(min_length=1, max_length=512)
+
+
+class GateAuthConfirmOut(BaseModel):
+    ok: bool = True
+    request_id: str
+    status: str = 'PENDING_GATEWAY_DECISION'
+    message: str = '认证已提交，请查看门禁屏幕'
+
+
+class DemoDataOut(BaseModel):
+    ok: bool = True
+    station_id: int
+    staff_username: str
+    user_username: str
+    credential_values: list[str]
+    parcel_ids: list[int]
+    gateway_code: str | None = None
 
 
 class PickupEventOut(ORMBase):

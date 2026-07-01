@@ -15,6 +15,8 @@ from gateway.models.entities import (
     EventSource,
     EventSyncStatus,
     GatewayTask,
+    GateAuthSession,
+    GateAuthStatus,
     LocalNfcCredential,
     LocalParcel,
     LocalParcelTagBinding,
@@ -50,18 +52,23 @@ class AccessControlService:
         task_service: TaskService,
         ble_service: BleService,
         station_id: str,
+        gateway_code: str = "",
+        auth_result_ttl_seconds: int = 15,
     ):
         self.db = db
         self.sync_service = sync_service
         self.task_service = task_service
         self.ble = ble_service
         self.station_id = str(station_id)
+        self.gateway_code = gateway_code
+        self.auth_result_ttl_seconds = auth_result_ttl_seconds
 
     def handle_access_card(
         self,
         reader_id: str,
         credential_type: str,
         credential_value: str,
+        _resolved_user_id: str | None = None,
     ) -> dict:
         credential_enum = self._normalize_credential_type(credential_type)
         if credential_enum is None:
@@ -75,13 +82,14 @@ class AccessControlService:
                 LocalNfcCredential.station_id == self.station_id,
             )
         )
-        if credential is None:
+        if credential is None and _resolved_user_id is None:
             return self._deny(reader_id, credential_type, credential_value, "CREDENTIAL_NOT_FOUND", "未识别用户卡")
+        user_id = _resolved_user_id or credential.user_id
 
         parcels = list(
             self.db.scalars(
                 select(LocalParcel).where(
-                    LocalParcel.receiver_user_id == credential.user_id,
+                    LocalParcel.receiver_user_id == user_id,
                     LocalParcel.station_id == self.station_id,
                     LocalParcel.status == ParcelStatus.WAITING_PICKUP,
                 )
@@ -94,7 +102,7 @@ class AccessControlService:
                 credential_value,
                 "NO_WAITING_PARCEL",
                 "暂无待取包裹",
-                user_id=credential.user_id,
+                user_id=user_id,
             )
 
         session_id = f"sess_{uuid.uuid4().hex}"
@@ -106,7 +114,7 @@ class AccessControlService:
 
         session = LocalPickupSession(
             session_id=session_id,
-            user_id=credential.user_id,
+            user_id=user_id,
             station_id=self.station_id,
             credential_type=credential_type,
             credential_value=credential_value,
@@ -212,7 +220,7 @@ class AccessControlService:
             ],
             "warnings": warnings,
         }
-        self._record_local_pickup_event(PickupEventType.NFC_ACCESS, payload, user_id=credential.user_id)
+        self._record_local_pickup_event(PickupEventType.NFC_ACCESS, payload, user_id=user_id)
         self._enqueue_audit("NFC_ACCESS_GRANTED", payload)
         if wake_tasks:
             self._enqueue_audit(
@@ -231,7 +239,7 @@ class AccessControlService:
         return {
             "access": "GRANTED",
             "reader_id": reader_id,
-            "user_id": credential.user_id,
+            "user_id": user_id,
             "pickup_session_id": session_id,
             "pickup_count": len(parcels),
             "session_color": session_color,
@@ -242,6 +250,36 @@ class AccessControlService:
             "items": items,
             "warnings": warnings,
         }
+
+    def handle_gate_auth_by_user(
+        self, auth_method: str, reader_id: str, user_id: str,
+        request_id: str | None = None, session_id: str | None = None,
+    ) -> dict:
+        result = self.handle_access_card(reader_id, auth_method, "", _resolved_user_id=str(user_id))
+        gate_status = GateAuthStatus.GRANTED if result["access"] == "GRANTED" else GateAuthStatus.DENIED
+        effective_id = session_id or request_id or f"gate_{uuid.uuid4().hex}"
+        row = self.db.scalar(select(GateAuthSession).where(GateAuthSession.session_id == effective_id))
+        if row is None:
+            row = GateAuthSession(
+                session_id=effective_id, auth_method=auth_method, reader_id=reader_id,
+                gateway_code=self.gateway_code, station_id=self.station_id,
+            )
+            self.db.add(row)
+        row.status, row.user_id = gate_status, str(user_id)
+        row.pickup_count = result.get("pickup_count", 0)
+        row.parcel_codes_json = json.dumps([item["parcel_code"] for item in result.get("items", [])])
+        row.shelves_json = json.dumps(result.get("shelves", []))
+        row.session_color, row.display_text = result.get("session_color"), result.get("display_text", "")
+        row.reason, row.confirmed_at, row.server_request_id = result.get("reason"), datetime.utcnow(), request_id
+        row.expires_at = datetime.utcnow() + timedelta(seconds=self.auth_result_ttl_seconds)
+        self._enqueue_audit(
+            "GATE_AUTH_GRANTED" if gate_status == GateAuthStatus.GRANTED else "GATE_AUTH_DENIED",
+            {"reader_id": reader_id, "auth_method": auth_method, "request_id": request_id,
+             "session_id": effective_id, "user_id": str(user_id), "pickup_count": row.pickup_count,
+             "reason": row.reason},
+        )
+        self.db.commit()
+        return {"ok": True, **result, "session_id": effective_id}
 
     def _deny(
         self,

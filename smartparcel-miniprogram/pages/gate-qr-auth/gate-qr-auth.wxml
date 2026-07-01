@@ -1,0 +1,4 @@
+<view class="page safe"><view class="title">扫码门禁认证</view><view class="subtitle">扫描门禁屏幕动态二维码</view>
+<button class="btn btn-primary" loading="{{submitting}}" bindtap="scan">扫描门禁二维码</button>
+<view class="glass-card"><view class="form-label">手动输入 payload（调试）</view><textarea class="input" value="{{raw}}" bindinput="input" placeholder="sps://gate-qr?..."/><button class="btn btn-ghost" bindtap="submitInput">提交输入内容</button></view>
+<view class="notice">{{statusText}}</view></view>

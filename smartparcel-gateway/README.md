@@ -257,3 +257,30 @@ pytest tests/ -v
 - **不要**让 `gateway_secret` 出现在小程序端
 - **不要**在生产环境启用 `ALLOW_DEV_HTTP=true`
 - **不要**在正式运行路径中使用 mock BLE/NFC
+# 阶段 2：统一门禁识别与凭证生命周期
+
+Gateway 统一支持 `CARD_UID`、`GATE_NFC_TAG`、`GATE_QR`。卡只有 `ACTIVE`
+状态可用；`LOST`、`REPLACED`、`DISABLED`、`EXPIRED` 一律拒绝。server 下发补卡事件后，
+旧 UID 在本地变为 `REPLACED`，新 UID 才会成为 `ACTIVE`，历史 UID不会被陈旧 UPSERT 重新激活。
+
+`sync-pull` 会应用 server 返回的 `events`，包括凭证、包裹、标签绑定、取件确认和
+`GATE_USER_AUTH_REQUESTED`。QR/NFC 用户确认最终仍由 Gateway 根据本地待取包裹决定是否放行。
+
+门禁固件使用独立 reader token，不使用小程序或运维 local session token：
+
+```text
+X-Gate-Reader-Id: GATE01
+X-Gate-Reader-Token: change-this-reader-token
+```
+
+接口：`POST /local/gate/access-card`、`GET /local/gate/qr-session`、
+`GET /local/gate/nfc-payload`、`GET /local/gate/auth-result`、
+`GET /local/gate/auth-session/{session_id}/result`。QR challenge 默认 60 秒，认证结果默认 15 秒。
+
+演示：
+
+```bash
+python -m gateway.main seed-demo-gate --user-id 2 --credential-type CARD_UID \
+  --credential-value CARD_UID_001 --parcel-code P20260701001 --shelf-code A03 --tag-id SPS-TAG-0001
+python -m gateway.main replace-card-demo --user-id 2 --old-card CARD_UID_001 --new-card CARD_UID_002
+```

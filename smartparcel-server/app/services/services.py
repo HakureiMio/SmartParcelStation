@@ -9,14 +9,19 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, _record_security_audit
 from app.models.enums import (
+    AccessCredentialStatus,
+    AccessCredentialType,
     EventSource,
     GatewayFactoryDeviceStatus,
     GatewayRegistrationTokenStatus,
+    GatewaySyncEventType,
+    GateAuthMethod,
     NotificationStatus,
     NotificationType,
     ParcelOrigin,
@@ -26,6 +31,7 @@ from app.models.enums import (
     PickupEventType,
     SyncDirection,
     SyncStatus,
+    TagStatus,
     UserRole,
 )
 from app.models.models import (
@@ -41,6 +47,7 @@ from app.models.models import (
     Station,
     Tag,
     User,
+    UserAccessCredential,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,6 +212,223 @@ async def ensure_default_users(db: AsyncSession) -> list[User]:
     for user in users:
         await db.refresh(user)
     return users
+
+
+async def _station_gateways(db: AsyncSession, station_id: int) -> list[Gateway]:
+    result = await db.execute(select(Gateway).where(Gateway.station_id == station_id))
+    return list(result.scalars().all())
+
+
+async def _queue_station_event(db: AsyncSession, station_id: int, event_type: GatewaySyncEventType, payload: dict) -> None:
+    for gateway in await _station_gateways(db, station_id):
+        db.add(GatewaySyncEvent(
+            event_id=uuid.uuid4().hex, gateway_id=gateway.id, station_id=station_id,
+            event_type=event_type.value, direction=SyncDirection.SERVER_TO_GATEWAY,
+            payload_json=payload, status=SyncStatus.PENDING, retry_count=0,
+        ))
+
+
+def _credential_payload(card: UserAccessCredential) -> dict:
+    return {
+        'user_id': str(card.user_id), 'station_id': str(card.station_id),
+        'credential_type': card.credential_type.value, 'credential_value': card.credential_value,
+        'status': card.status.value, 'expires_at': None,
+    }
+
+
+async def bind_user_card(
+    db: AsyncSession, user_id: int, station_id: int, credential_type: AccessCredentialType,
+    credential_value: str, reason: str | None, admin: User,
+) -> tuple[UserAccessCredential, UserAccessCredential | None]:
+    if credential_type != AccessCredentialType.CARD_UID:
+        raise HTTPException(status_code=400, detail='This endpoint only binds CARD_UID credentials')
+    user = await db.get(User, user_id)
+    if not user:
+        raise _not_found('user')
+    if user.station_id != station_id:
+        raise HTTPException(status_code=403, detail='User does not belong to this station')
+    if admin.role != UserRole.SERVER_ADMIN and admin.station_id != station_id:
+        raise HTTPException(status_code=403, detail='Staff can only operate their own station')
+
+    value = credential_value.strip().upper()
+    existing = (await db.execute(
+        select(UserAccessCredential).where(UserAccessCredential.credential_value == value).with_for_update()
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail='Credential UID has already been issued and cannot be rebound')
+
+    old_card = (await db.execute(select(UserAccessCredential).where(
+        UserAccessCredential.user_id == user_id,
+        UserAccessCredential.station_id == station_id,
+        UserAccessCredential.credential_type == AccessCredentialType.CARD_UID,
+        UserAccessCredential.status == AccessCredentialStatus.ACTIVE,
+    ).with_for_update())).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    card = UserAccessCredential(
+        user_id=user_id, station_id=station_id, credential_type=credential_type,
+        credential_value=value, status=AccessCredentialStatus.ACTIVE,
+        reason=reason, created_by_admin_id=admin.id,
+    )
+    db.add(card)
+    await db.flush()
+    if old_card:
+        old_card.status = AccessCredentialStatus.REPLACED
+        old_card.replaced_by_id = card.id
+        old_card.replaced_at = now
+        old_card.reason = 'REPLACED_BY_NEW_CARD'
+        disabled = _credential_payload(old_card)
+        disabled['reason'] = old_card.reason
+        await _queue_station_event(db, station_id, GatewaySyncEventType.USER_ACCESS_CREDENTIAL_DISABLED, disabled)
+    await _queue_station_event(db, station_id, GatewaySyncEventType.USER_ACCESS_CREDENTIAL_UPSERT, _credential_payload(card))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='Credential UID already exists')
+    await db.refresh(card)
+    if old_card:
+        await db.refresh(old_card)
+    return card, old_card
+
+
+async def list_user_cards(db: AsyncSession, user_id: int, staff: User) -> list[UserAccessCredential]:
+    user = await db.get(User, user_id)
+    if not user:
+        raise _not_found('user')
+    if staff.role != UserRole.SERVER_ADMIN and staff.station_id != user.station_id:
+        raise HTTPException(status_code=403, detail='Staff can only operate their own station')
+    rows = await db.execute(select(UserAccessCredential).where(
+        UserAccessCredential.user_id == user_id,
+        UserAccessCredential.station_id == user.station_id,
+        UserAccessCredential.credential_type == AccessCredentialType.CARD_UID,
+    ).order_by(UserAccessCredential.id.desc()))
+    return list(rows.scalars().all())
+
+
+async def report_card_lost(db: AsyncSession, user: User, card_id: int, reason: str) -> UserAccessCredential:
+    card = await db.get(UserAccessCredential, card_id)
+    if not card or card.user_id != user.id:
+        raise _not_found('card')
+    if card.status != AccessCredentialStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail='Only an ACTIVE card can be reported lost')
+    card.status = AccessCredentialStatus.LOST
+    card.lost_reported_at = datetime.now(timezone.utc)
+    card.reason = reason
+    payload = _credential_payload(card)
+    payload['reason'] = reason
+    await _queue_station_event(db, card.station_id, GatewaySyncEventType.USER_ACCESS_CREDENTIAL_DISABLED, payload)
+    await db.commit()
+    await db.refresh(card)
+    return card
+
+
+async def disable_user_card(db: AsyncSession, user_id: int, card_id: int, reason: str, staff: User) -> UserAccessCredential:
+    card = await db.get(UserAccessCredential, card_id)
+    if not card or card.user_id != user_id:
+        raise _not_found('card')
+    if staff.role != UserRole.SERVER_ADMIN and staff.station_id != card.station_id:
+        raise HTTPException(status_code=403, detail='Staff can only operate their own station')
+    if card.status == AccessCredentialStatus.ACTIVE:
+        card.status = AccessCredentialStatus.DISABLED
+        card.disabled_at = datetime.now(timezone.utc)
+        card.reason = reason
+        payload = _credential_payload(card)
+        payload['reason'] = reason
+        await _queue_station_event(db, card.station_id, GatewaySyncEventType.USER_ACCESS_CREDENTIAL_DISABLED, payload)
+        await db.commit()
+        await db.refresh(card)
+    return card
+
+
+async def request_gate_auth(db: AsyncSession, user: User, data: dict) -> dict:
+    if user.role != UserRole.USER:
+        raise HTTPException(status_code=403, detail='USER role required')
+    if user.station_id is not None and user.station_id != data['station_id']:
+        raise HTTPException(status_code=403, detail='User does not belong to this station')
+    gateway = (await db.execute(select(Gateway).where(
+        Gateway.gateway_code == data['gateway_code'], Gateway.station_id == data['station_id']
+    ))).scalar_one_or_none()
+    if not gateway:
+        raise HTTPException(status_code=404, detail='Gateway not found for station')
+    method = data['auth_method']
+    if method == GateAuthMethod.GATE_QR and data['expires_at'] < int(datetime.now(timezone.utc).timestamp()):
+        raise HTTPException(status_code=400, detail='QR session has expired')
+    request_id = f'gate_req_{uuid.uuid4().hex}'
+    payload = {
+        'request_id': request_id, 'auth_method': method.value, 'user_id': str(user.id),
+        'station_id': str(data['station_id']), 'gateway_code': data['gateway_code'],
+        'reader_id': data['reader_id'], 'requested_at': datetime.now(timezone.utc).isoformat(),
+    }
+    for key in ('session_id', 'nonce', 'gate_nfc_tag_id'):
+        if data.get(key) is not None:
+            payload[key] = data[key]
+    await _queue_station_event(db, data['station_id'], GatewaySyncEventType.GATE_USER_AUTH_REQUESTED, payload)
+    await db.commit()
+    return {'request_id': request_id}
+
+
+async def ensure_demo_data(db: AsyncSession) -> dict:
+    users = await ensure_default_users(db)
+    staff = next(user for user in users if user.role == UserRole.STAFF)
+    demo_user = next(user for user in users if user.role == UserRole.USER)
+    credential = (await db.execute(select(UserAccessCredential).where(
+        UserAccessCredential.credential_value == 'CARD_UID_001'
+    ))).scalar_one_or_none()
+    if not credential:
+        credential = UserAccessCredential(
+            user_id=demo_user.id, station_id=1, credential_type=AccessCredentialType.CARD_UID,
+            credential_value='CARD_UID_001', status=AccessCredentialStatus.ACTIVE,
+            reason='DEMO_DATA', created_by_admin_id=staff.id,
+        )
+        db.add(credential)
+        await db.flush()
+        await _queue_station_event(db, 1, GatewaySyncEventType.USER_ACCESS_CREDENTIAL_UPSERT, _credential_payload(credential))
+
+    parcel_ids = []
+    for index, shelf in enumerate(('A03', 'B01'), start=1):
+        code = f'DEMO-PARCEL-{index:04d}'
+        parcel = (await db.execute(select(Parcel).where(Parcel.parcel_code == code))).scalar_one_or_none()
+        if not parcel:
+            parcel = Parcel(
+                parcel_code=code, pickup_code=f'10000{index}', receiver_user_id=demo_user.id,
+                receiver_phone=demo_user.phone, receiver_name_masked=demo_user.display_name,
+                station_id=1, status=ParcelStatus.WAITING_PICKUP, origin=ParcelOrigin.SERVER_MANUAL,
+                sync_status=ParcelSyncStatus.SYNC_PENDING, created_by_admin_id=staff.id,
+            )
+            db.add(parcel)
+            await db.flush()
+            await _queue_station_event(db, 1, GatewaySyncEventType.PARCEL_UPSERT, {
+                'parcel_id': parcel.id, 'parcel_code': code, 'user_id': str(demo_user.id),
+                'station_id': '1', 'shelf': shelf, 'status': ParcelStatus.WAITING_PICKUP.value,
+                'tag_id': f'SPS-TAG-{index:04d}',
+            })
+        tag_value = f'SPS-TAG-{index:04d}'
+        tag = (await db.execute(select(Tag).where(Tag.tag_id == tag_value))).scalar_one_or_none()
+        if not tag:
+            tag = Tag(tag_id=tag_value, encrypted_token=f'demo-token-{index}', station_id=1, status=TagStatus.IDLE)
+            db.add(tag)
+            await db.flush()
+        binding_value = f'DEMO-BINDING-{index:04d}'
+        binding = (await db.execute(select(ParcelTagBinding).where(
+            ParcelTagBinding.pickup_binding_id == binding_value
+        ))).scalar_one_or_none()
+        if not binding:
+            db.add(ParcelTagBinding(
+                pickup_binding_id=binding_value, parcel_id=parcel.id, tag_id=tag.id,
+                station_id=1, status=ParcelTagBindingStatus.ACTIVE,
+            ))
+            await _queue_station_event(db, 1, GatewaySyncEventType.PARCEL_TAG_BINDING_UPSERT, {
+                'parcel_id': parcel.id, 'tag_id': tag_value, 'pickup_binding_id': binding_value,
+                'station_id': '1', 'shelf': shelf, 'status': ParcelTagBindingStatus.ACTIVE.value,
+            })
+        parcel_ids.append(parcel.id)
+    await db.commit()
+    gateway = (await db.execute(select(Gateway).where(Gateway.gateway_code == 'GW001'))).scalar_one_or_none()
+    return {
+        'station_id': 1, 'staff_username': staff.username, 'user_username': demo_user.username,
+        'credential_values': [credential.credential_value], 'parcel_ids': parcel_ids,
+        'gateway_code': gateway.gateway_code if gateway else None,
+    }
 
 
 async def get_station(db: AsyncSession, station_id: int) -> Station:
@@ -964,6 +1188,8 @@ async def pickup_confirm(db: AsyncSession, user_id: int, event_id: str, tag_id: 
     parcel = await db.get(Parcel, binding.parcel_id)
     if not parcel:
         raise _not_found('parcel')
+    if parcel.receiver_user_id != user_id:
+        raise HTTPException(status_code=403, detail='Users can only confirm their own parcels')
 
     if parcel.status == ParcelStatus.PICKED_UP:
         existing_pickup = await db.execute(
@@ -987,17 +1213,9 @@ async def pickup_confirm(db: AsyncSession, user_id: int, event_id: str, tag_id: 
     )
     db.add(pickup_event)
 
-    db.add(
-        GatewaySyncEvent(
-            event_id=uuid.uuid4().hex,
-            gateway_id=1,
-            station_id=parcel.station_id,
-            event_type='PICKUP_CONFIRMED',
-            direction=SyncDirection.SERVER_TO_GATEWAY,
-            payload_json={'parcel_id': parcel.id, 'status': ParcelStatus.PICKED_UP.value},
-            status=SyncStatus.PENDING,
-            retry_count=0,
-        )
+    await _queue_station_event(
+        db, parcel.station_id, GatewaySyncEventType.PARCEL_PICKUP_CONFIRMED,
+        {'parcel_id': parcel.id, 'user_id': str(user_id), 'status': ParcelStatus.PICKED_UP.value},
     )
 
     await db.commit()

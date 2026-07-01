@@ -638,6 +638,53 @@ def cli_gate_access(
         db.close()
 
 
+@app.command("seed-demo-gate")
+def cli_seed_demo_gate(
+    user_id: str = typer.Option(...), credential_type: str = typer.Option("CARD_UID"),
+    credential_value: str = typer.Option(...), parcel_code: str = typer.Option(...),
+    shelf_code: str = typer.Option(...), tag_id: str = typer.Option(...),
+):
+    """Seed one local gate credential, waiting parcel, tag and binding."""
+    _prepare_console(); settings = get_settings(); init_db(); db = SessionLocal()
+    try:
+        ctype = CredentialType(credential_type.upper())
+        credential = db.scalar(select(LocalNfcCredential).where(LocalNfcCredential.credential_value == credential_value))
+        if credential is None:
+            db.add(LocalNfcCredential(credential_type=ctype, credential_value=credential_value,
+                user_id=user_id, station_id=settings.station_id, status=CredentialStatus.ACTIVE))
+        parcel = db.scalar(select(LocalParcel).where(LocalParcel.parcel_code == parcel_code))
+        if parcel is None:
+            parcel = LocalParcel(server_parcel_id=parcel_code, parcel_code=parcel_code,
+                receiver_user_id=user_id, station_id=settings.station_id,
+                status=ParcelStatus.WAITING_PICKUP, shelf_code=shelf_code)
+            db.add(parcel)
+        tag = db.scalar(select(LocalTag).where(LocalTag.tag_id == tag_id))
+        if tag is None: db.add(LocalTag(tag_id=tag_id, encrypted_token="", station_id=settings.station_id, status=TagStatus.IDLE))
+        binding = db.scalar(select(LocalParcelTagBinding).where(LocalParcelTagBinding.server_parcel_id == parcel_code))
+        if binding is None: db.add(LocalParcelTagBinding(pickup_binding_id=f"demo-{parcel_code}",
+            server_parcel_id=parcel_code, tag_id=tag_id, station_id=settings.station_id, status=BindingStatus.ACTIVE))
+        db.commit(); typer.echo(f"demo gate seeded: {credential_value} -> {user_id}, {parcel_code}@{shelf_code}")
+    finally: db.close()
+
+
+@app.command("replace-card-demo")
+def cli_replace_card_demo(user_id: str = typer.Option(...), old_card: str = typer.Option(...), new_card: str = typer.Option(...)):
+    """Apply a local card replacement without reactivating the old UID."""
+    _prepare_console(); settings = get_settings(); init_db(); db = SessionLocal()
+    try:
+        old = db.scalar(select(LocalNfcCredential).where(LocalNfcCredential.credential_value == old_card))
+        if old is None: raise typer.BadParameter(f"old card not found: {old_card}")
+        old.status, old.replaced_at, old.replaced_by_value, old.reason = CredentialStatus.REPLACED, datetime.utcnow(), new_card, "REPLACED_BY_NEW_CARD"
+        new = db.scalar(select(LocalNfcCredential).where(LocalNfcCredential.credential_value == new_card))
+        if new is None:
+            db.add(LocalNfcCredential(credential_type=CredentialType.CARD_UID, credential_value=new_card,
+                user_id=user_id, station_id=settings.station_id, status=CredentialStatus.ACTIVE))
+        elif new.status != CredentialStatus.ACTIVE or new.user_id != user_id:
+            raise typer.BadParameter("new card already exists and cannot be rebound")
+        db.commit(); typer.echo(f"card replaced: {old_card}=REPLACED, {new_card}=ACTIVE")
+    finally: db.close()
+
+
 # ---------------------------------------------------------------------------
 # Server commands
 # ---------------------------------------------------------------------------

@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     local_api_port: int = Field(default=19000, alias="LOCAL_API_PORT")
     local_api_token: str = Field(default="", alias="LOCAL_API_TOKEN")
     local_api_token_ttl_seconds: int = Field(default=3600, alias="LOCAL_API_TOKEN_TTL_SECONDS")
+    gate_reader_auth_enabled: bool = Field(default=True, alias="GATE_READER_AUTH_ENABLED")
+    gate_reader_id: str = Field(default="GATE01", alias="GATE_READER_ID")
+    gate_reader_token: str = Field(default="change-this-reader-token", alias="GATE_READER_TOKEN")
+    gate_qr_ttl_seconds: int = Field(default=60, alias="GATE_QR_TTL_SECONDS")
+    gate_auth_result_ttl_seconds: int = Field(default=15, alias="GATE_AUTH_RESULT_TTL_SECONDS")
+    gate_nfc_tag_id: str = Field(default="GATE-NFC-001", alias="GATE_NFC_TAG_ID")
 
     # Provisioning API
     provisioning_enabled: bool = Field(default=True, alias="PROVISIONING_ENABLED")

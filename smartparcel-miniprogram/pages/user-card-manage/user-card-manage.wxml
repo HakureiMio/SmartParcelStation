@@ -1,0 +1,6 @@
+<view class="page safe"><view class="title">我的门禁卡</view>
+<view class="notice">补办新卡请联系站点员工。补办后旧卡将失效，不能再开门。</view>
+<view class="error" wx:if="{{errorText}}">{{errorText}}</view>
+<view class="section-title">当前 ACTIVE 卡</view><view class="glass-card" wx:for="{{activeCards}}" wx:key="id"><view class="row"><text>卡号</text><text>{{item.credential_value}}</text></view><view class="row"><text>状态</text><text class="badge badge-green">{{item.status}}</text></view><button class="btn btn-warn" data-id="{{item.id}}" bindtap="reportLost">报失当前卡</button></view>
+<view class="glass-card" wx:if="{{!loading && activeCards.length === 0 && !errorText}}">当前没有 ACTIVE 卡</view>
+<view class="section-title">历史卡</view><view class="glass-card" wx:for="{{historyCards}}" wx:key="id"><view class="row"><text>{{item.credential_value}}</text><text class="badge">{{item.status}}</text></view><view class="hint">{{item.reason || ''}}</view></view></view>

@@ -163,6 +163,7 @@ async def get_current_server_admin(current_user: User = Depends(get_current_user
 
 async def get_current_server_admin_or_bootstrap(
     x_admin_bootstrap_token: Optional[str] = Header(default=None, alias='X-Admin-Bootstrap-Token'),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     x_dev_user_id: Optional[int] = Header(default=None, alias='X-Dev-User-Id'),
     x_dev_role: Optional[str] = Header(default=None, alias='X-Dev-Role'),
     db: AsyncSession = Depends(get_db),
@@ -170,6 +171,11 @@ async def get_current_server_admin_or_bootstrap(
     settings = get_settings()
     if x_admin_bootstrap_token and hmac.compare_digest(x_admin_bootstrap_token, settings.admin_bootstrap_token):
         return {'auth': 'bootstrap'}
+    if credentials and credentials.credentials:
+        bearer_user = await _load_user_from_token(db, credentials.credentials)
+        if bearer_user and bearer_user.role == UserRole.SERVER_ADMIN:
+            return bearer_user
+        _raise_auth('Admin role required')
     user = await get_current_user_dev(x_dev_user_id=x_dev_user_id, x_dev_role=x_dev_role, db=db)
     if user.role != UserRole.SERVER_ADMIN:
         _raise_auth('Admin role required')

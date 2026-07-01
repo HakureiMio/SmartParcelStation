@@ -1,0 +1,7 @@
+<view class="page safe">
+  <view class="title">门禁认证</view><view class="subtitle">选择门禁现场支持的认证方式</view>
+  <view class="glass-card"><view class="section-title">1. 刷实体卡 / 手机模拟卡</view><view class="subtitle">请直接在门禁读卡区刷卡，此方式不经过小程序。</view></view>
+  <view class="glass-card"><view class="section-title">2. 微信扫码开门</view><view class="subtitle">扫描门禁屏幕二维码。</view><button class="btn btn-primary" bindtap="goQr">扫描二维码</button></view>
+  <view class="glass-card"><view class="section-title">3. 手机 NFC 开门</view><view class="subtitle">用手机贴近门禁 NFC 标签。</view><button class="btn btn-primary" bindtap="goNfc">读取门禁 NFC</button></view>
+  <view class="notice">小程序只提交认证请求，是否放行请以门禁屏幕为准。</view>
+</view>
