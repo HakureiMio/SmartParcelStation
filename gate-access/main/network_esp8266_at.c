@@ -31,13 +31,58 @@ static int parse_http_status(const char *response)
 
 static void copy_http_body(const char *raw, char *response, size_t response_size)
 {
-    const char *body = strstr(raw, "\r\n\r\n");
-    if (body != NULL) {
-        body += 4;
-    } else {
-        body = raw;
+    if (raw == NULL || response == NULL || response_size == 0) {
+        return;
     }
-    strlcpy(response, body, response_size);
+
+    /* ESP-AT prepends command chatter such as "Recv ...\r\n\r\nSEND OK"
+     * before +IPD and the real HTTP response. Always anchor parsing at the
+     * HTTP status line, otherwise SEND OK is mistaken for a 9-byte body. */
+    const char *http_start = strstr(raw, "HTTP/1.");
+    if (http_start == NULL) {
+        strlcpy(response, raw, response_size);
+        return;
+    }
+
+    const char *header_end = strstr(http_start, "\r\n\r\n");
+    if (header_end == NULL) {
+        strlcpy(response, http_start, response_size);
+        return;
+    }
+
+    const char *body = header_end + 4;
+    const char *content_length_header = strstr(http_start, "content-length:");
+    if (content_length_header == NULL || content_length_header > header_end) {
+        content_length_header = strstr(http_start, "Content-Length:");
+    }
+
+    size_t body_length = 0;
+    if (content_length_header != NULL && content_length_header < header_end) {
+        const char *value = strchr(content_length_header, ':');
+        if (value != NULL) {
+            body_length = (size_t)strtoul(value + 1, NULL, 10);
+        }
+    }
+
+    size_t available = strlen(body);
+    if (body_length == 0 || body_length > available) {
+        body_length = available;
+        /* Fallback for responses without Content-Length: remove ESP-AT
+         * transport notifications appended after the HTTP body. */
+        static const char *trailers[] = {"\r\nCLOSED", "\r\nSEND OK", "\r\n+IPD,"};
+        for (size_t i = 0; i < sizeof(trailers) / sizeof(trailers[0]); ++i) {
+            const char *trailer = strstr(body, trailers[i]);
+            if (trailer != NULL && (size_t)(trailer - body) < body_length) {
+                body_length = (size_t)(trailer - body);
+            }
+        }
+    }
+
+    if (body_length >= response_size) {
+        body_length = response_size - 1;
+    }
+    memcpy(response, body, body_length);
+    response[body_length] = '\0';
 }
 
 esp_err_t network_client_start(void)
@@ -154,6 +199,6 @@ esp_err_t network_client_http_get(
     }
     *http_status = parse_http_status(s_http_raw);
     copy_http_body(s_http_raw, response, response_size);
-    ESP_LOGI(TAG, "HTTP status=%d", *http_status);
+    ESP_LOGI(TAG, "HTTP status=%d, body_bytes=%u", *http_status, (unsigned)strlen(response));
     return *http_status > 0 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }

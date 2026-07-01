@@ -169,6 +169,63 @@ static const uint8_t s_digit_font[10][7] = {
     {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E}, /* 9 */
 };
 
+enum {
+    CN_SWIPE, CN_CARD, CN_SCAN, CN_CODE, CN_PHONE, CN_DEVICE,
+    CN_PASS, CN_THROUGH, CN_FAIL, CN_DEFEAT, CN_PLEASE, CN_RETRY, CN_TRY,
+    CN_SCHOOL, CN_GARDEN, CN_TOUCH, CN_ONE, CN_SCAN_DETAIL, CN_TWO, CN_DIMENSION,
+    CN_ENTER, CN_STATION, CN_USER, CN_HOUSEHOLD, CN_LETTER, CN_INFO,
+    CN_PARCEL, CN_WRAP, CN_NUMBER, CN_QUANTITY, CN_IDENTIFIER, CN_GOODS, CN_SHELF,
+};
+
+/* 16x16 monochrome glyphs generated from SimHei for the fixed gate UI text. */
+static const uint16_t s_cn_font[][16] = {
+    {0x1052,0x1052,0x1FD2,0x1012,0x1112,0x1FD2,0x1952,0x1952,0x3952,0x2942,0x29C2,0x010E,0x0100,0,0,0},
+    {0x0180,0x01FC,0x0180,0x0180,0x3FFE,0x0180,0x0180,0x01F0,0x0198,0x0188,0x0180,0x0180,0,0,0,0},
+    {0x08FE,0x0802,0x3F02,0x0802,0x0882,0x0EFE,0x1802,0x2802,0x0802,0x0802,0x09FE,0x1802,0,0,0,0},
+    {0x3EFC,0x0844,0x0848,0x1048,0x1E48,0x32FE,0x3202,0x3202,0x12FA,0x1E02,0x1204,0x001C,0,0,0,0},
+    {0x1FFC,0x0080,0x0080,0x1FFC,0x0080,0x0080,0x0080,0x3FFE,0x0080,0x0080,0x0080,0x0380,0,0,0,0},
+    {0x08F8,0x0888,0x3E88,0x0888,0x1888,0x1E88,0x1A88,0x2888,0x2888,0x0888,0x090A,0x0B0E,0,0,0,0},
+    {0x1098,0x0870,0x03FC,0x0224,0x3224,0x13FC,0x1224,0x13FC,0x1224,0x122C,0x1C00,0x23FE,0,0,0,0},
+    {0x1808,0x0808,0x0FFE,0x0008,0x3988,0x0888,0x0888,0x0808,0x0818,0x0838,0x1E00,0x23FE,0,0,0,0},
+    {0x0C80,0x0880,0x0FFC,0x1080,0x3080,0x0080,0x3FFE,0x01C0,0x0160,0x0230,0x0C1C,0x3806,0,0,0,0},
+    {0x3F20,0x1120,0x153E,0x1544,0x1564,0x15A4,0x1528,0x3528,0x0C18,0x0A10,0x112C,0x20C6,0,0,0,0},
+    {0x19FE,0x0C20,0x01FC,0x0020,0x3BFE,0x19FC,0x1904,0x19FC,0x1904,0x1FFC,0x1904,0x010C,0,0,0,0},
+    {0x1FE0,0x0080,0x3FFE,0x0080,0x0FF8,0x0888,0x0FF8,0x0FF8,0x0080,0x1FFC,0x0080,0x3FFE,0,0,0,0},
+    {0x1026,0x0824,0x07FE,0x0020,0x3030,0x13D0,0x1090,0x1090,0x1090,0x1CCA,0x1B8A,0x1006,0,0,0,0},
+    {0x1020,0x1030,0x13FE,0x7C00,0x1088,0x10CC,0x3106,0x3D08,0x7488,0x50D8,0x5070,0x1020,0x10D8,0x178E,0x0202,0},
+    {0x7FFC,0x3FFC,0x2004,0x27E4,0x2004,0x2FF4,0x2244,0x2244,0x2244,0x2654,0x2C74,0x2804,0x3FFC,0x2004,0x6000,0},
+    {0x0088,0x0048,0x7C08,0x11FE,0x1050,0x3152,0x3D52,0x6552,0x6554,0x6554,0x2554,0x3C50,0x2450,0x27FE,0,0},
+    {0,0,0,0,0,0,0x7FFE,0x7FFE,0,0,0,0,0,0,0,0},
+    {0x1088,0x1088,0x13FE,0x1088,0x7C88,0x1000,0x13FC,0x3B24,0x7324,0x13FC,0x1324,0x1324,0x1324,0x33FC,0x0306,0},
+    {0,0,0,0x3FF8,0,0,0,0,0,0,0,0x7FFE,0x7FFE,0,0,0},
+    {0x10B0,0x3190,0x2100,0x2DFE,0x4B30,0x7B30,0x15FC,0x1130,0x2130,0x79FC,0x0130,0x0130,0x7DFE,0x4100,0x0100,0},
+    {0x0090,0x3090,0x1090,0x07FE,0x0090,0x7090,0x1090,0x17FE,0x1110,0x1110,0x1310,0x1210,0x7E00,0x43FE,0,0},
+    {0x1020,0x1820,0x0820,0x7E3E,0x0020,0x0420,0x2620,0x24FC,0x3484,0x1484,0x0484,0x1E84,0x70FC,0x0084,0x0080,0},
+    {0x1FFC,0x118C,0x118C,0x1FFC,0x118C,0x118C,0x118C,0x1FFC,0x318C,0x318C,0x218C,0x218C,0x6198,0,0,0},
+    {0x0180,0x0080,0x0080,0x1FFC,0x1004,0x1004,0x1004,0x1FFC,0x1004,0x1000,0x1000,0x3000,0x2000,0x6000,0,0},
+    {0x0840,0x1860,0x17FE,0x1000,0x33FC,0x3000,0x5000,0x53FC,0x1000,0x13FC,0x1304,0x1304,0x13FC,0x1304,0x1000,0},
+    {0x0300,0x0200,0x1FF8,0x1008,0x1FF8,0x1008,0x1FF8,0x1008,0x1FF8,0x0080,0x248C,0x2486,0x4412,0x07F0,0,0},
+    {0x0400,0x0C00,0x1FF8,0x1008,0x3008,0x7FC8,0x5048,0x1048,0x1FC8,0x1008,0x1038,0x1002,0x1806,0x0FFE,0,0},
+    {0x0180,0x7FFE,0,0x1FF8,0x1FF8,0x1088,0x1FF8,0x7FFE,0x0280,0x0D3C,0x7302,0x0678,0x1FB0,0x670E,0,0},
+    {0x0C20,0x2D20,0x0F60,0x7FFE,0x1C44,0x3E44,0x6DCC,0x08C8,0x7F28,0x1128,0x3238,0x0E10,0x0D68,0x30C6,0x4000,0},
+    {0x1FF8,0x1FF8,0x1008,0x1FF8,0x7FFE,0,0x1FF8,0x1FF8,0x1188,0x1FF8,0x3FF8,0x0180,0x7FFE,0,0,0},
+    {0x0FF8,0x0818,0x0818,0x0FF8,0,0x7FFE,0x0400,0x0400,0x0FF8,0x0018,0x0018,0x0010,0x00F0,0x0080,0,0},
+    {0x0440,0x0C4C,0x1878,0x39E0,0x6B42,0x087E,0x0800,0x1FF8,0x0FF8,0x0808,0x0988,0x0148,0x0278,0x7C0E,0x2000,0},
+    {0x0800,0x087C,0x3F7C,0x0964,0x1964,0x1164,0x337C,0x4180,0x0180,0x7FFE,0x07E0,0x0DB0,0x318E,0x6182,0x0180,0},
+};
+
+static const uint8_t s_alpha_font[26][7] = {
+    {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},{14,17,16,16,16,17,14},
+    {30,17,17,17,17,17,30},{31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
+    {14,17,16,23,17,17,15},{17,17,17,31,17,17,17},{14,4,4,4,4,4,14},
+    {7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
+    {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},{14,17,17,17,17,17,14},
+    {30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
+    {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},
+    {17,17,17,17,17,10,4},{17,17,17,21,21,21,10},{17,17,10,4,10,17,17},
+    {17,17,10,4,4,4,4},{31,1,2,4,8,16,31},
+};
+
 static void show_text(const char *text)
 {
     ESP_LOGI(TAG, "%s", text);
@@ -314,6 +371,64 @@ static void draw_decimal_digit(char digit, int x, int y, int scale, uint16_t col
                     }
                 }
             }
+        }
+    }
+}
+
+static void draw_cn_glyph(int glyph, int x, int y, int scale, uint16_t color)
+{
+    for (int row = 0; row < 16; ++row) {
+        for (int col = 0; col < 16; ++col) {
+            if ((s_cn_font[glyph][row] & (1U << (15 - col))) == 0) continue;
+            for (int dy = 0; dy < scale; ++dy) {
+                for (int dx = 0; dx < scale; ++dx) {
+                    int px = x + col * scale + dx;
+                    int py = y + row * scale + dy;
+                    if (px >= 0 && px < SPS_DISPLAY_WIDTH && py >= 0 && py < SPS_DISPLAY_HEIGHT) {
+                        s_color_buffer[py * SPS_DISPLAY_WIDTH + px] = color;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void fill_rect(int x, int y, int width, int height, uint16_t color);
+
+static void draw_ascii_text(const char *text, int x, int y, int scale,
+                            int max_chars, uint16_t color)
+{
+    for (int i = 0; text != NULL && text[i] != '\0' && i < max_chars; ++i) {
+        char ch = text[i];
+        const uint8_t *rows = NULL;
+        if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
+        if (ch >= '0' && ch <= '9') rows = s_digit_font[ch - '0'];
+        else if (ch >= 'A' && ch <= 'Z') rows = s_alpha_font[ch - 'A'];
+        for (int row = 0; row < 7; ++row) {
+            uint8_t bits = rows != NULL ? rows[row] : (ch == '-' && row == 3 ? 0x1F : 0);
+            if (ch == '.' && row == 6) bits = 0x04;
+            if (ch == '/' && row >= 1 && row <= 5) bits = (uint8_t)(1U << (6 - row));
+            for (int col = 0; col < 5; ++col) if (bits & (1U << (4 - col))) {
+                fill_rect(x + i * 6 * scale + col * scale, y + row * scale,
+                          scale, scale, color);
+            }
+        }
+    }
+}
+
+static void draw_cn_text(const int *glyphs, int count, int x, int y,
+                         int scale, int gap, uint16_t color)
+{
+    for (int i = 0; i < count; ++i) {
+        draw_cn_glyph(glyphs[i], x + i * (16 * scale + gap), y, scale, color);
+    }
+}
+
+static void fill_rect(int x, int y, int width, int height, uint16_t color)
+{
+    for (int py = y; py < y + height && py < SPS_DISPLAY_HEIGHT; ++py) {
+        for (int px = x; px < x + width && px < SPS_DISPLAY_WIDTH; ++px) {
+            if (px >= 0 && py >= 0) s_color_buffer[py * SPS_DISPLAY_WIDTH + px] = color;
         }
     }
 }
@@ -630,6 +745,110 @@ esp_err_t display_ui_show_qr(const char *payload)
         ESP_LOGI(TAG, "QR_READY: matrix=%dx%d scale=%d origin=(%d,%d)",
                  size, size, scale, origin_x, origin_y);
     }
+    return err;
+}
+
+esp_err_t display_ui_show_main_menu(void)
+{
+    ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "LCD is not initialized");
+    const int scale = 2, glyph = 32, gap = 6;
+    const int panel_x = 24, panel_w = SPS_DISPLAY_WIDTH - 48;
+    const int line1[] = {CN_PLEASE, CN_PASS, CN_THROUGH, CN_SCHOOL, CN_GARDEN, CN_CARD};
+    const int line2[] = {CN_PHONE, CN_DEVICE, CN_TOUCH, CN_ONE, CN_TOUCH};
+    const int line3[] = {CN_SCAN, CN_SCAN_DETAIL, CN_TWO, CN_DIMENSION, CN_CODE, CN_ENTER, CN_STATION};
+
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
+    fill_color_buffer(0xE73F);
+    fill_rect(panel_x, 64, panel_w, 512, 0xFFFF);
+    fill_rect(panel_x, 64, panel_w, 12, 0x047F);
+    int w1 = 6 * glyph + 5 * gap, w2 = 5 * glyph + 4 * gap, w3 = 7 * glyph + 6 * gap;
+    draw_cn_text(line1, 6, (SPS_DISPLAY_WIDTH - w1) / 2, 145, scale, gap, 0x18E3);
+    draw_cn_text(line2, 5, (SPS_DISPLAY_WIDTH - w2) / 2, 300, scale, gap, 0x18E3);
+    draw_cn_text(line3, 7, (SPS_DISPLAY_WIDTH - w3) / 2, 455, scale, gap, 0x18E3);
+    draw_ascii_text("/", 225, 222, 5, 1, 0x7BEF);
+    draw_ascii_text("/", 225, 377, 5, 1, 0x7BEF);
+
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
+                                               SPS_DISPLAY_HEIGHT, s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
+    if (err == ESP_OK) ESP_LOGI(TAG, "MAIN_MENU: 刷卡 / 扫码 / 手机 NFC");
+    return err;
+}
+
+esp_err_t display_ui_show_gate_result(const gateway_access_result_t *result, bool request_ok)
+{
+    ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "LCD is not initialized");
+    bool granted = request_ok && result != NULL && result->access_granted;
+    int phrase[3] = {CN_PLEASE, CN_RETRY, CN_TRY};
+    int phrase_len = 3;
+    uint16_t background = 0xFFE0;
+    if (request_ok && granted) {
+        phrase[0] = CN_PASS; phrase[1] = CN_THROUGH; phrase_len = 2;
+        background = 0x07E0;
+    } else if (request_ok) {
+        phrase[0] = CN_FAIL; phrase[1] = CN_DEFEAT; phrase_len = 2;
+        background = 0xF800;
+    }
+
+    const int scale = 4, glyph = 16 * scale, gap = 16;
+    int width = phrase_len * glyph + (phrase_len - 1) * gap;
+    int x = (SPS_DISPLAY_WIDTH - width) / 2;
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
+    fill_color_buffer(granted ? 0xFFFF : background);
+    for (int i = 0; i < phrase_len; ++i) {
+        draw_cn_glyph(phrase[i], x + i * (glyph + gap), granted ? 48 : 225,
+                      scale, granted ? 0x0640 : 0xFFFF);
+    }
+
+    if (granted) {
+        const int user_label[] = {CN_USER, CN_HOUSEHOLD, CN_LETTER, CN_INFO};
+        const int count_label[] = {CN_PARCEL, CN_WRAP, CN_NUMBER, CN_QUANTITY};
+        const int code_label[] = {CN_GOODS, CN_SHELF, CN_IDENTIFIER, CN_CODE};
+        draw_cn_text(user_label, 4, 38, 170, 2, 4, 0x39E7);
+        draw_cn_text(count_label, 4, 38, 270, 2, 4, 0x39E7);
+        draw_cn_text(code_label, 4, 38, 370, 2, 4, 0x39E7);
+        draw_ascii_text(result->user_id[0] ? result->user_id : "-",
+                        215, 176, 4, 10, 0x1082);
+    }
+
+    if (granted && result->pickup_count >= 0) {
+        char count[12];
+        snprintf(count, sizeof(count), "%d", result->pickup_count);
+        int digit_scale = 4, advance = 6 * digit_scale;
+        int count_x = 215;
+        for (size_t i = 0; i < strlen(count); ++i) {
+            draw_decimal_digit(count[i], count_x + (int)i * advance, 276,
+                               digit_scale, 0x1082);
+        }
+    }
+    if (granted) {
+        const char *codes = result->shelves[0] ? result->shelves : "-";
+        char shown[49];
+        size_t len = strlen(codes), copy = len > 48 ? 48 : len;
+        memcpy(shown, codes, copy);
+        shown[copy] = '\0';
+        if (len > 48) memcpy(shown + 45, "...", 4);
+        size_t first_len = strlen(shown) > 24 ? 24 : strlen(shown);
+        char second[25] = {0};
+        if (shown[first_len] != '\0') strlcpy(second, shown + first_len, sizeof(second));
+        shown[first_len] = '\0';
+        draw_ascii_text(shown, 38, 425, 3, 24, 0x1082);
+        if (second[0]) draw_ascii_text(second, 38, 475, 3, 24, 0x1082);
+    }
+
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
+                                               SPS_DISPLAY_HEIGHT, s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
+    ESP_LOGI(TAG, "RESULT_PAGE: request_ok=%s granted=%s user=%s text=%s pickup_count=%d shelves=%s parcels=%s reason=%s",
+             request_ok ? "yes" : "no", granted ? "yes" : "no",
+             result != NULL ? result->user_id : "",
+             result != NULL ? result->display_text : "",
+             result != NULL ? result->pickup_count : -1,
+             result != NULL ? result->shelves : "",
+             result != NULL ? result->parcel_codes : "",
+             result != NULL ? result->reason : "");
     return err;
 }
 

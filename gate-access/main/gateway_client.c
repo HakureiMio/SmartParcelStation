@@ -91,6 +91,36 @@ static void stringify_array(cJSON *root, const char *name, char *dest, size_t de
     }
 }
 
+static void copy_json_scalar(cJSON *root, const char *name, char *dest, size_t dest_size)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        strlcpy(dest, item->valuestring, dest_size);
+    } else if (cJSON_IsNumber(item)) {
+        snprintf(dest, dest_size, "%d", item->valueint);
+    }
+}
+
+static void stringify_item_codes(cJSON *root, char *dest, size_t dest_size)
+{
+    dest[0] = '\0';
+    cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "items");
+    if (!cJSON_IsArray(items)) return;
+    size_t used = 0;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *code = cJSON_GetObjectItemCaseSensitive(item, "parcel_code");
+        if (!cJSON_IsString(code) || code->valuestring == NULL) continue;
+        int n = snprintf(dest + used, dest_size - used, "%s%s",
+                         used ? " " : "", code->valuestring);
+        if (n < 0 || (size_t)n >= dest_size - used) {
+            dest[dest_size - 1] = '\0';
+            break;
+        }
+        used += (size_t)n;
+    }
+}
+
 static void parse_gateway_response(const char *body, gateway_access_result_t *result)
 {
     cJSON *root = cJSON_Parse(body);
@@ -100,13 +130,17 @@ static void parse_gateway_response(const char *body, gateway_access_result_t *re
     }
 
     result->access_granted = parse_access_value(root);
+    copy_json_scalar(root, "user_id", result->user_id, sizeof(result->user_id));
     copy_json_string(root, "pickup_session_id", result->pickup_session_id, sizeof(result->pickup_session_id));
     copy_json_string(root, "display_text", result->display_text, sizeof(result->display_text));
     copy_json_string(root, "status", result->status, sizeof(result->status));
     copy_json_string(root, "reason", result->reason, sizeof(result->reason));
     copy_json_string(root, "session_color", result->session_color, sizeof(result->session_color));
     stringify_array(root, "shelves", result->shelves, sizeof(result->shelves));
-    stringify_array(root, "parcel_codes", result->parcel_codes, sizeof(result->parcel_codes));
+    stringify_item_codes(root, result->parcel_codes, sizeof(result->parcel_codes));
+    if (result->parcel_codes[0] == '\0') {
+        stringify_array(root, "parcel_codes", result->parcel_codes, sizeof(result->parcel_codes));
+    }
     stringify_warnings(root, result->warnings, sizeof(result->warnings));
 
     cJSON *pickup_count = cJSON_GetObjectItemCaseSensitive(root, "pickup_count");

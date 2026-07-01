@@ -34,11 +34,11 @@
 #define SPS_DEMO_ESP8266_OPEN_AP_TEST   0
 #define SPS_ESP8266_CONNECT_ONLY_TEST   0
 
-#define SPS_GATEWAY_HOST            "192.168.4.1"
+#define SPS_GATEWAY_HOST            "10.150.10.140"
 #define SPS_GATEWAY_PORT            19000
-#define SPS_GATEWAY_URL             "http://192.168.4.1:19000"
+#define SPS_GATEWAY_URL             "http://10.150.10.140:19000"
 
-#define SPS_WIFI_SSID               "Galaxy zflip 7"
+#define SPS_WIFI_SSID               "高风险網絡"
 #define SPS_WIFI_PASSWORD           "zjtzjt666"
 #define SPS_READER_ID               "GATE01"
 #define SPS_READER_TOKEN            "change-this-reader-token"
@@ -48,6 +48,9 @@
 #define SPS_GATEWAY_AUTH_PATH       "/local/gate/auth-result?reader_id=" SPS_READER_ID
 #define SPS_GATE_AUTH_POLL_MS       1000
 #define SPS_QR_REFRESH_MS           45000
+#define SPS_UI_PAGE_TIMEOUT_MS      10000  /* QR page */
+#define SPS_RESULT_PAGE_TIMEOUT_MS  5000   /* card/QR authentication result */
+#define SPS_CARD_REMOVE_CONFIRM_MS  2000
 
 /* ── ESP8266 UART ────────────────────────────────────────────────
  *
@@ -88,6 +91,7 @@
 #define SPS_PN532_UART_BAUD         115200
 #define SPS_PN532_UART_BUF_SIZE     512
 #define SPS_PN532_UART_TIMEOUT_MS   1200
+#define SPS_PN532_CARD_POLL_TIMEOUT_MS 250
 #define SPS_PN532_UART_LOOPBACK_TEST 0
 #define SPS_PN532_USE_RESET         0
 #define SPS_PN532_RST_GPIO          GPIO_NUM_NC
@@ -132,6 +136,8 @@
 #define SPS_TOUCH_I2C_ADDR          0x15
 #define SPS_TOUCH_I2C_FALLBACK_ADDR 0x38
 #define SPS_TOUCH_POLL_INTERVAL_MS  30
+#define SPS_TOUCH_TASK_STACK_SIZE   3072
+#define SPS_TOUCH_TASK_PRIORITY     6
 #define SPS_TOUCH_SWAP_XY           0
 #define SPS_TOUCH_INVERT_Y          0
 

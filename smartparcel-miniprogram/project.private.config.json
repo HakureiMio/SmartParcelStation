@@ -17,5 +17,18 @@
     "checkInvalidKey": true,
     "ignoreDevUnusedFiles": true,
     "bigPackageSizeSupport": false
+  },
+  "condition": {
+    "miniprogram": {
+      "list": [
+        {
+          "name": "门禁NFC测试",
+          "pathName": "pages/gate-nfc-auth/gate-nfc-auth",
+          "query": "gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001",
+          "scene": null,
+          "launchMode": "default"
+        }
+      ]
+    }
   }
 }

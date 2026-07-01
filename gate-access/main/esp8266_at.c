@@ -352,6 +352,10 @@ esp_err_t esp8266_at_tcp_transact(
     }
     ESP_LOGI(TAG, "TCP response bytes buffered=%u", (unsigned)strlen(response));
 
-    at_command("AT+CIPCLOSE", "OK", 1000);
+    /* A server-side "Connection: close" normally produces CLOSED first.
+     * Sending CIPCLOSE afterwards only generates a misleading ERROR. */
+    if (strstr(response, "CLOSED") == NULL) {
+        at_command("AT+CIPCLOSE", "OK", 1000);
+    }
     return err;
 }

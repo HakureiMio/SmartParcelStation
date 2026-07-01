@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "gateway_client.h"
 #include "network_client.h"
@@ -47,6 +48,33 @@ static esp_err_t init_nvs(void)
 static gateway_qr_session_t    s_qr_session;
 static gateway_access_result_t s_card_result;
 static gateway_access_result_t s_auth_result;
+
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+} touch_event_t;
+
+static QueueHandle_t s_touch_event_queue;
+
+static void touch_input_task(void *arg)
+{
+    (void)arg;
+    bool was_pressed = false;
+    while (true) {
+        bool pressed = false;
+        uint16_t x = 0, y = 0;
+        esp_err_t err = touch_test_read(&pressed, &x, &y);
+        if (err == ESP_OK) {
+            if (pressed && !was_pressed) {
+                touch_event_t event = {.x = x, .y = y};
+                xQueueOverwrite(s_touch_event_queue, &event);
+                ESP_LOGI(TAG, "Touch event queued: x=%u y=%u", x, y);
+            }
+            was_pressed = pressed;
+        }
+        vTaskDelay(pdMS_TO_TICKS(SPS_TOUCH_POLL_INTERVAL_MS));
+    }
+}
 
 /* ═══════════════════════════════════════════════════════════════
  * QR DISPLAY TEST MODE
@@ -291,18 +319,7 @@ static void run_display_first(void)
 
 #if !SPS_DEMO_DISPLAY_FIRST && !SPS_DEMO_QR_DISPLAY_TEST && !SPS_DIAG_PN532_ONLY
 
-static bool should_upload_uid(const char *uid, const char *last_uid, TickType_t *last_tick)
-{
-    TickType_t now = xTaskGetTickCount();
-    TickType_t debounce_ticks = pdMS_TO_TICKS(SPS_CARD_DEBOUNCE_MS);
-    if (strcmp(uid, last_uid) == 0 && (now - *last_tick) < debounce_ticks) {
-        return false;
-    }
-    *last_tick = now;
-    return true;
-}
-
-static esp_err_t refresh_gate_qr(void)
+static esp_err_t refresh_gate_qr(bool draw_now)
 {
     memset(&s_qr_session, 0, sizeof(s_qr_session));
     esp_err_t err = gateway_client_fetch_qr_session(&s_qr_session);
@@ -312,6 +329,7 @@ static esp_err_t refresh_gate_qr(void)
     }
     ESP_LOGI(TAG, "QR session received: session_id=%s payload_bytes=%u",
              s_qr_session.session_id, (unsigned)strlen(s_qr_session.qr_payload));
+    if (!draw_now) return ESP_OK;
     err = display_ui_show_qr(s_qr_session.qr_payload);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "display_ui_show_qr failed: %s", esp_err_to_name(err));
@@ -321,10 +339,12 @@ static esp_err_t refresh_gate_qr(void)
 
 /* Touch counter — used to generate distinct local QR payloads */
 static unsigned s_touch_count = 0;
-static bool s_card_showing = false;
-static bool s_touch_active = false;   /* touch-down color is on screen */
-static int64_t s_card_show_start_us = 0;
-#define SPS_CARD_SHOW_MS  2000
+
+typedef enum {
+    GATE_PAGE_MENU,
+    GATE_PAGE_QR,
+    GATE_PAGE_RESULT,
+} gate_page_t;
 
 static void show_local_qr(void)
 {
@@ -358,6 +378,26 @@ static void gate_main_task(void *arg)
     /* ── Init touch ────────────────────────────────────────── */
     esp_err_t touch_err = touch_test_init();
     bool touch_ok = (touch_err == ESP_OK);
+    if (touch_ok) {
+        s_touch_event_queue = xQueueCreate(1, sizeof(touch_event_t));
+        if (s_touch_event_queue == NULL) {
+            ESP_LOGE(TAG, "Touch event queue allocation failed");
+            touch_ok = false;
+        } else {
+            BaseType_t created = xTaskCreate(touch_input_task, "touch_input",
+                                             SPS_TOUCH_TASK_STACK_SIZE, NULL,
+                                             SPS_TOUCH_TASK_PRIORITY, NULL);
+            if (created != pdPASS) {
+                ESP_LOGE(TAG, "Touch input task creation failed");
+                vQueueDelete(s_touch_event_queue);
+                s_touch_event_queue = NULL;
+                touch_ok = false;
+            } else {
+                ESP_LOGI(TAG, "Touch input task started: poll=%dms priority=%d",
+                         SPS_TOUCH_POLL_INTERVAL_MS, SPS_TOUCH_TASK_PRIORITY);
+            }
+        }
+    }
     ESP_LOGI(TAG, "Touch %s", touch_ok ? "ready — tap to refresh QR" : "unavailable");
 
     /* ── Init WiFi ─────────────────────────────────────────── */
@@ -372,60 +412,45 @@ static void gate_main_task(void *arg)
     log_stack_watermark("pn532_reader_init done");
 
     /* ── Initial QR ────────────────────────────────────────── */
-    esp_err_t qr_err = refresh_gate_qr();
-    if (qr_err != ESP_OK) {
-        show_local_qr();
-    }
-    s_touch_count++;
+    esp_err_t qr_err = net_err == ESP_OK ? refresh_gate_qr(false) : ESP_ERR_INVALID_STATE;
+    if (s_touch_event_queue != NULL) xQueueReset(s_touch_event_queue);
+    display_ui_show_main_menu();
+    ESP_LOGI(TAG, "MAIN_MENU ready: swipe card / scan QR / phone NFC");
 
-    char last_uid[32] = {0};
-    TickType_t last_uid_tick = 0;
-    int64_t last_qr_refresh_us = esp_timer_get_time();
+    char latched_uid[32] = {0};
     int64_t last_auth_poll_us = 0;
-    bool was_touched = false;
+    int64_t page_deadline_us = 0;
+    int64_t card_absent_since_us = 0;
+    bool card_latched = false;
+    bool auth_terminal_shown = false;
+    bool qr_auth_pending = false;
+    gate_page_t page = GATE_PAGE_MENU;
 
     int loop_count = 0;
     while (true) {
         int64_t now_us = esp_timer_get_time();
         loop_count++;
 
-        /* ── Card showing timeout → return to QR ──────────── */
-        if (s_card_showing && !s_touch_active &&
-            (now_us - s_card_show_start_us) / 1000 >= SPS_CARD_SHOW_MS) {
-            s_card_showing = false;
-            if (net_err == ESP_OK && s_qr_session.qr_payload[0]) {
-                display_ui_show_qr(s_qr_session.qr_payload);
-            } else {
-                show_local_qr();
-            }
-            ESP_LOGI(TAG, "Card timeout → QR");
+        if (page != GATE_PAGE_MENU && now_us >= page_deadline_us) {
+            page = GATE_PAGE_MENU;
+            qr_auth_pending = false;
+            if (s_touch_event_queue != NULL) xQueueReset(s_touch_event_queue);
+            display_ui_show_main_menu();
+            ESP_LOGI(TAG, "Page timeout -> MAIN_MENU");
         }
 
-        /* ── Touch → upper/lower half color switch ────────── */
-        if (touch_ok) {
-            bool pressed = false; uint16_t tx = 0, ty = 0;
-            if (touch_test_read(&pressed, &tx, &ty) == ESP_OK) {
-                if (pressed && !was_touched) {
-                    s_touch_count++;
-                    s_touch_active = true;
-                    bool upper = ty < (SPS_DISPLAY_HEIGHT / 2);
-                    display_ui_fill_color(upper ? 0xF800 : 0x001F,
-                                          upper ? "RED (upper)" : "BLUE (lower)");
-                    ESP_LOGI(TAG, "TOUCH #%u: x=%u y=%u zone=%s",
-                             s_touch_count, tx, ty, upper ? "UPPER" : "LOWER");
-                } else if (!pressed && was_touched) {
-                    s_touch_active = false;
-                    if (!s_card_showing) {
-                        if (net_err == ESP_OK && s_qr_session.qr_payload[0]) {
-                            display_ui_show_qr(s_qr_session.qr_payload);
-                        } else {
-                            show_local_qr();
-                        }
-                    }
-                    ESP_LOGI(TAG, "TOUCH release → back to QR");
-                }
-                was_touched = pressed;
-            }
+        touch_event_t touch_event;
+        if (touch_ok && page == GATE_PAGE_MENU &&
+            xQueueReceive(s_touch_event_queue, &touch_event, 0) == pdTRUE) {
+            s_touch_count++;
+            qr_err = net_err == ESP_OK ? refresh_gate_qr(true) : ESP_ERR_INVALID_STATE;
+            if (qr_err != ESP_OK) show_local_qr();
+            page = GATE_PAGE_QR;
+            page_deadline_us = esp_timer_get_time() + (int64_t)SPS_UI_PAGE_TIMEOUT_MS * 1000;
+            auth_terminal_shown = false;
+            qr_auth_pending = (qr_err == ESP_OK);
+            ESP_LOGI(TAG, "Touch x=%u y=%u -> QR page for %dms",
+                     touch_event.x, touch_event.y, SPS_UI_PAGE_TIMEOUT_MS);
         }
 
         /* ── Poll PN532 for card (every loop) ─────────────── */
@@ -441,15 +466,28 @@ static void gate_main_task(void *arg)
             }
 
             if (card_present && uid_hex[0] != '\0') {
-                ESP_LOGI(TAG, "Card detected UID=%s", uid_hex);
-                display_ui_show_card_id_numeric(uid_hex);
-                s_card_showing = true;
-                s_card_show_start_us = now_us;
-
-                if (should_upload_uid(uid_hex, last_uid, &last_uid_tick)) {
-                    strlcpy(last_uid, uid_hex, sizeof(last_uid));
+                card_absent_since_us = 0;
+                if (!card_latched || strcmp(uid_hex, latched_uid) != 0) {
+                    card_latched = true;
+                    strlcpy(latched_uid, uid_hex, sizeof(latched_uid));
+                    ESP_LOGI(TAG, "Card detected UID=%s", uid_hex);
                     memset(&s_card_result, 0, sizeof(s_card_result));
-                    gateway_client_post_access_card(uid_hex, &s_card_result);
+                    esp_err_t post_err = gateway_client_post_access_card(uid_hex, &s_card_result);
+                    display_ui_show_gate_result(&s_card_result, post_err == ESP_OK);
+                    page = GATE_PAGE_RESULT;
+                    page_deadline_us = esp_timer_get_time() + (int64_t)SPS_RESULT_PAGE_TIMEOUT_MS * 1000;
+                    auth_terminal_shown = true;
+                    qr_auth_pending = false;
+                }
+            } else if (card_latched) {
+                int64_t poll_time_us = esp_timer_get_time();
+                if (card_absent_since_us == 0) card_absent_since_us = poll_time_us;
+                if ((poll_time_us - card_absent_since_us) / 1000 >= SPS_CARD_REMOVE_CONFIRM_MS) {
+                    card_latched = false;
+                    latched_uid[0] = '\0';
+                    card_absent_since_us = 0;
+                    ESP_LOGI(TAG, "Card removed for %dms; reader re-armed",
+                             SPS_CARD_REMOVE_CONFIRM_MS);
                 }
             }
         } else if (loop_count % 20 == 0) {
@@ -457,22 +495,27 @@ static void gate_main_task(void *arg)
             pn532_err = pn532_reader_init();
         }
 
-        /* ── Periodic QR + auth poll (every ~30 loops = 3s) ─ */
-        if (loop_count % 30 == 0) {
-            if (net_err == ESP_OK && (now_us - last_qr_refresh_us) / 1000 >= SPS_QR_REFRESH_MS) {
-                qr_err = refresh_gate_qr();
-                if (qr_err != ESP_OK && !s_card_showing) { show_local_qr(); }
-                last_qr_refresh_us = now_us;
+        if (net_err == ESP_OK && qr_auth_pending &&
+            (now_us - last_auth_poll_us) / 1000 >= SPS_GATE_AUTH_POLL_MS) {
+            memset(&s_auth_result, 0, sizeof(s_auth_result));
+            esp_err_t auth_err = gateway_client_poll_auth_result(&s_auth_result);
+            last_auth_poll_us = now_us;
+            bool terminal = auth_err == ESP_OK &&
+                (strcmp(s_auth_result.status, "GRANTED") == 0 ||
+                 strcmp(s_auth_result.status, "DENIED") == 0 ||
+                 strcmp(s_auth_result.status, "EXPIRED") == 0);
+            if (terminal && !auth_terminal_shown) {
+                display_ui_show_gate_result(&s_auth_result, true);
+                page = GATE_PAGE_RESULT;
+                page_deadline_us = esp_timer_get_time() + (int64_t)SPS_RESULT_PAGE_TIMEOUT_MS * 1000;
+                auth_terminal_shown = true;
+                qr_auth_pending = false;
+                ESP_LOGI(TAG, "Auth result %s -> RESULT page", s_auth_result.status);
             }
-            if (net_err == ESP_OK && (now_us - last_auth_poll_us) / 1000 >= SPS_GATE_AUTH_POLL_MS) {
-                memset(&s_auth_result, 0, sizeof(s_auth_result));
-                gateway_client_poll_auth_result(&s_auth_result);
-                last_auth_poll_us = now_us;
-            }
-            if (net_err != ESP_OK) {
-                net_err = network_client_start();
-                if (net_err == ESP_OK) { qr_err = refresh_gate_qr(); }
-            }
+        }
+        if (loop_count % 30 == 0 && net_err != ESP_OK) {
+            net_err = network_client_start();
+            if (net_err == ESP_OK) qr_err = refresh_gate_qr(false);
         }
 
         vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));

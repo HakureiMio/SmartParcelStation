@@ -9,6 +9,7 @@ typedef struct {
     bool access_granted;
     int http_status;
     int pickup_count;
+    char user_id[32];
     char pickup_session_id[80];
     char display_text[160];
     char warnings[256];

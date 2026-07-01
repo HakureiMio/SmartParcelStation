@@ -182,8 +182,10 @@ static esp_err_t pn532_read_response(uint8_t expected_cmd, uint8_t *payload, siz
 {
     const uint8_t start_code[] = {PN532_PREAMBLE, PN532_STARTCODE1, PN532_STARTCODE2};
     bool quiet_no_card_timeout = expected_cmd == PN532_CMD_IN_LIST;
+    int response_timeout_ms = quiet_no_card_timeout ? SPS_PN532_CARD_POLL_TIMEOUT_MS
+                                                    : SPS_PN532_UART_TIMEOUT_MS;
     esp_err_t start_err = uart_find_sequence(start_code, sizeof(start_code),
-                                             SPS_PN532_UART_TIMEOUT_MS,
+                                             response_timeout_ms,
                                              !quiet_no_card_timeout);
     if (start_err != ESP_OK) {
         if (!quiet_no_card_timeout) {

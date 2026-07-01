@@ -6,7 +6,7 @@
  * - If serverBaseUrl is HTTP, it is rejected unless allowInsecureServerHttpInDev is true.
  */
 const CONFIG = {
-  serverBaseUrl: 'https://api.example.com/api/v1',
+  serverBaseUrl: 'http://198.13.33.220:18000/api/v1',
   defaultGatewayProvisioningBaseUrl: 'http://192.168.4.1:19000',
   requestTimeoutMs: 12000,
 
@@ -17,7 +17,7 @@ const CONFIG = {
   allowInsecureLocalHttp: true,
 
   /** Allow HTTP for server requests (development only). Set false in production. */
-  allowInsecureServerHttpInDev: false
+  allowInsecureServerHttpInDev: true
 }
 
 module.exports = CONFIG
