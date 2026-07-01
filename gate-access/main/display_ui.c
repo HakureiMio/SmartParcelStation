@@ -572,13 +572,23 @@ esp_err_t display_ui_show_qr(const char *payload)
 {
     ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL && payload != NULL,
                         ESP_ERR_INVALID_STATE, TAG, "display/QR payload unavailable");
+
+    size_t payload_len = strlen(payload);
+    if (payload_len == 0 || payload_len > 2048) {
+        ESP_LOGE(TAG, "QR payload length %u out of range", (unsigned)payload_len);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     const size_t qr_buffer_len = qrcodegen_BUFFER_LEN_FOR_VERSION(20);
     uint8_t *temp = heap_caps_malloc(qr_buffer_len, MALLOC_CAP_8BIT);
-    uint8_t *qr = heap_caps_malloc(qr_buffer_len, MALLOC_CAP_8BIT);
-    ESP_RETURN_ON_FALSE(temp != NULL && qr != NULL, ESP_ERR_NO_MEM, TAG, "allocate QR buffers failed");
+    uint8_t *qr   = heap_caps_malloc(qr_buffer_len, MALLOC_CAP_8BIT);
+    if (temp == NULL) { free(qr); return ESP_ERR_NO_MEM; }
+    if (qr   == NULL) { free(temp); return ESP_ERR_NO_MEM; }
+
     bool encoded = qrcodegen_encodeText(payload, temp, qr, qrcodegen_Ecc_MEDIUM,
                                          qrcodegen_VERSION_MIN, 20, qrcodegen_Mask_AUTO, true);
     if (!encoded) {
+        ESP_LOGE(TAG, "qrcodegen_encodeText failed for payload len=%u", (unsigned)payload_len);
         free(temp); free(qr);
         return ESP_ERR_INVALID_SIZE;
     }
@@ -589,6 +599,11 @@ esp_err_t display_ui_show_qr(const char *payload)
     int pixels = (size + quiet * 2) * scale;
     int origin_x = (SPS_DISPLAY_WIDTH - pixels) / 2;
     int origin_y = (SPS_DISPLAY_HEIGHT - pixels) / 2;
+
+    ESP_LOGI(TAG, "QR draw: payload_len=%u qr_ver=%d scale=%d origin=(%d,%d) free_heap=%" PRIu32 " free_psram=%" PRIu32,
+             (unsigned)payload_len, size, scale, origin_x, origin_y,
+             esp_get_free_heap_size(), esp_get_free_internal_heap_size());
+
     xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
     fill_color_buffer(0xFFFF);
     for (int y = 0; y < size; ++y) {
@@ -596,16 +611,25 @@ esp_err_t display_ui_show_qr(const char *payload)
             if (!qrcodegen_getModule(qr, x, y)) continue;
             int px0 = origin_x + (x + quiet) * scale;
             int py0 = origin_y + (y + quiet) * scale;
-            for (int dy = 0; dy < scale; ++dy)
-                for (int dx = 0; dx < scale; ++dx)
-                    s_color_buffer[(py0 + dy) * SPS_DISPLAY_WIDTH + px0 + dx] = 0x0000;
+            for (int dy = 0; dy < scale; ++dy) {
+                for (int dx = 0; dx < scale; ++dx) {
+                    int px = px0 + dx;
+                    int py = py0 + dy;
+                    if (px >= 0 && px < SPS_DISPLAY_WIDTH && py >= 0 && py < SPS_DISPLAY_HEIGHT) {
+                        s_color_buffer[py * SPS_DISPLAY_WIDTH + px] = 0x0000;
+                    }
+                }
+            }
         }
     }
     esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
                                                SPS_DISPLAY_HEIGHT, s_color_buffer);
     xSemaphoreGive(s_framebuffer_mutex);
     free(temp); free(qr);
-    ESP_LOGI(TAG, "QR_READY: matrix=%dx%d scale=%d; caption: WeChat scan / card / gate NFC", size, size, scale);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "QR_READY: matrix=%dx%d scale=%d origin=(%d,%d)",
+                 size, size, scale, origin_x, origin_y);
+    }
     return err;
 }
 

@@ -12,6 +12,10 @@
 static const char *TAG = "network";
 static bool s_network_ready;
 
+/* Reusable buffers to avoid stack allocation of 2KB+ per HTTP call. */
+static char s_http_raw[SPS_HTTP_RESPONSE_MAX];
+static char s_http_request[800];
+
 static int parse_http_status(const char *response)
 {
     const char *line = strstr(response, "HTTP/1.");
@@ -87,10 +91,8 @@ esp_err_t network_client_http_post_json(
     response[0] = '\0';
     *http_status = 0;
 
-    char request[768] = {0};
     int request_len = snprintf(
-        request,
-        sizeof(request),
+        s_http_request, sizeof(s_http_request),
         "POST %s HTTP/1.1\r\n"
         "Host: %s:%d\r\n"
         "Content-Type: application/json\r\n"
@@ -107,22 +109,24 @@ esp_err_t network_client_http_post_json(
         SPS_READER_TOKEN,
         (unsigned)strlen(json),
         json);
-    if (request_len < 0 || request_len >= (int)sizeof(request)) {
+    if (request_len < 0 || request_len >= (int)sizeof(s_http_request)) {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    char raw[SPS_HTTP_RESPONSE_MAX] = {0};
+    memset(s_http_raw, 0, sizeof(s_http_raw));
     ESP_LOGI(TAG, "POST %s", path);
-    esp_err_t err = esp8266_at_tcp_transact(host, port, request, (size_t)request_len, raw, sizeof(raw));
+    esp_err_t err = esp8266_at_tcp_transact(host, port, s_http_request, (size_t)request_len,
+                                             s_http_raw, sizeof(s_http_raw));
     if (err != ESP_OK) {
-        s_network_ready = false;
-        ESP_LOGE(TAG, "HTTP POST over ESP8266 failed: %s", esp_err_to_name(err));
-        ESP_LOGW(TAG, "Raw response: %s", raw);
+        /* TCP connection failure to gateway — WiFi is still connected.
+         * Only mark network ready=false on actual ESP8266 AT failures. */
+        ESP_LOGE(TAG, "HTTP POST over ESP8266 failed: %s (WiFi still connected)", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Raw response: %s", s_http_raw);
         return err;
     }
 
-    *http_status = parse_http_status(raw);
-    copy_http_body(raw, response, response_size);
+    *http_status = parse_http_status(s_http_raw);
+    copy_http_body(s_http_raw, response, response_size);
     ESP_LOGI(TAG, "HTTP status=%d, body=%s", *http_status, response);
     return *http_status > 0 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
@@ -135,22 +139,21 @@ esp_err_t network_client_http_get(
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_network_ready) return ESP_ERR_INVALID_STATE;
-    char request[768] = {0};
-    int request_len = snprintf(request, sizeof(request),
+    int request_len = snprintf(s_http_request, sizeof(s_http_request),
         "GET %s HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n"
         "X-Gate-Reader-Id: %s\r\nX-Gate-Reader-Token: %s\r\n\r\n",
         path, host, port, SPS_READER_ID, SPS_READER_TOKEN);
-    if (request_len < 0 || request_len >= (int)sizeof(request)) return ESP_ERR_INVALID_SIZE;
-    char raw[SPS_HTTP_RESPONSE_MAX] = {0};
+    if (request_len < 0 || request_len >= (int)sizeof(s_http_request)) return ESP_ERR_INVALID_SIZE;
+    memset(s_http_raw, 0, sizeof(s_http_raw));
     ESP_LOGI(TAG, "GET %s", path);
-    esp_err_t err = esp8266_at_tcp_transact(host, port, request, (size_t)request_len, raw, sizeof(raw));
+    esp_err_t err = esp8266_at_tcp_transact(host, port, s_http_request, (size_t)request_len,
+                                             s_http_raw, sizeof(s_http_raw));
     if (err != ESP_OK) {
-        s_network_ready = false;
-        ESP_LOGE(TAG, "HTTP GET over ESP8266 failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "HTTP GET over ESP8266 failed: %s (WiFi still connected)", esp_err_to_name(err));
         return err;
     }
-    *http_status = parse_http_status(raw);
-    copy_http_body(raw, response, response_size);
+    *http_status = parse_http_status(s_http_raw);
+    copy_http_body(s_http_raw, response, response_size);
     ESP_LOGI(TAG, "HTTP status=%d", *http_status);
     return *http_status > 0 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }

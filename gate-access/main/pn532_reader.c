@@ -156,13 +156,13 @@ static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
     frame[7 + cmd_len] = PN532_POSTAMBLE;
 
     /*
-     * Always prepend the HSU wake preamble.  Without it, PN532 will
-     * miss commands after even brief idle periods (< 100 ms).
-     * Do NOT flush between wake and command — the PN532 uses the
-     * command bytes as part of its baud-rate auto-detection.
-     *
-     * Continuous write:  wake (6 B) + frame (cmd_len+8 B)
+     * Flush any stale RX data from a previous failed transaction,
+     * then send wake+command as one continuous stream.
+     * The flush happens BEFORE any TX, so the PN532 wake-up
+     * timing is not affected.
      */
+    uart_flush_input(SPS_PN532_UART_PORT);
+
     size_t total = sizeof(PN532_WAKE) + cmd_len + 8;
     uint8_t combined[sizeof(PN532_WAKE) + 80];
     memcpy(combined, PN532_WAKE, sizeof(PN532_WAKE));

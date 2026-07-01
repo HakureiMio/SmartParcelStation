@@ -11,6 +11,9 @@
 
 static const char *TAG = "gateway";
 
+/* Reusable HTTP response buffer (avoids stack allocation of 2048+ bytes). */
+static char s_response[SPS_HTTP_RESPONSE_MAX];
+
 static void copy_json_string(cJSON *root, const char *name, char *dest, size_t dest_size)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
@@ -126,10 +129,11 @@ static void parse_gateway_response(const char *body, gateway_access_result_t *re
     cJSON_Delete(root);
 }
 
-static esp_err_t gateway_get_json(const char *path, char *response, size_t response_size, int *http_status)
+static esp_err_t gateway_get_json(const char *path, int *http_status)
 {
+    memset(s_response, 0, sizeof(s_response));
     esp_err_t err = network_client_http_get(SPS_GATEWAY_HOST, SPS_GATEWAY_PORT, path,
-                                             response, response_size, http_status);
+                                             s_response, sizeof(s_response), http_status);
     if (err != ESP_OK) return err;
     return (*http_status >= 200 && *http_status < 300) ? ESP_OK : ESP_FAIL;
 }
@@ -138,10 +142,9 @@ esp_err_t gateway_client_fetch_qr_session(gateway_qr_session_t *result)
 {
     if (result == NULL) return ESP_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
-    char response[SPS_HTTP_RESPONSE_MAX] = {0};
-    esp_err_t err = gateway_get_json(SPS_GATEWAY_QR_PATH, response, sizeof(response), &result->http_status);
+    esp_err_t err = gateway_get_json(SPS_GATEWAY_QR_PATH, &result->http_status);
     if (err != ESP_OK) return err;
-    cJSON *root = cJSON_Parse(response);
+    cJSON *root = cJSON_Parse(s_response);
     if (root == NULL) return ESP_ERR_INVALID_RESPONSE;
     copy_json_string(root, "session_id", result->session_id, sizeof(result->session_id));
     copy_json_string(root, "qr_payload", result->qr_payload, sizeof(result->qr_payload));
@@ -157,11 +160,10 @@ esp_err_t gateway_client_poll_auth_result(gateway_access_result_t *result)
     if (result == NULL) return ESP_ERR_INVALID_ARG;
     memset(result, 0, sizeof(*result));
     result->pickup_count = -1;
-    char response[SPS_HTTP_RESPONSE_MAX] = {0};
-    esp_err_t err = gateway_get_json(SPS_GATEWAY_AUTH_PATH, response, sizeof(response), &result->http_status);
+    esp_err_t err = gateway_get_json(SPS_GATEWAY_AUTH_PATH, &result->http_status);
     result->request_ok = err == ESP_OK;
     if (err != ESP_OK) return err;
-    parse_gateway_response(response, result);
+    parse_gateway_response(s_response, result);
     return ESP_OK;
 }
 
@@ -188,23 +190,23 @@ esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_re
         return ESP_ERR_NO_MEM;
     }
 
-    char response[SPS_HTTP_RESPONSE_MAX] = {0};
+    memset(s_response, 0, sizeof(s_response));
     esp_err_t err = network_client_http_post_json(
         SPS_GATEWAY_HOST,
         SPS_GATEWAY_PORT,
         SPS_GATEWAY_PATH,
         payload,
-        response,
-        sizeof(response),
+        s_response,
+        sizeof(s_response),
         &result->http_status);
     cJSON_free(payload);
 
     result->request_ok = err == ESP_OK && result->http_status >= 200 && result->http_status < 300;
     if (!result->request_ok) {
-        ESP_LOGE(TAG, "Gateway request failed, HTTP status=%d, body=%s", result->http_status, response);
+        ESP_LOGE(TAG, "Gateway request failed, HTTP status=%d, body=%s", result->http_status, s_response);
         return err == ESP_OK ? ESP_FAIL : err;
     }
 
-    parse_gateway_response(response, result);
+    parse_gateway_response(s_response, result);
     return ESP_OK;
 }

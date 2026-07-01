@@ -91,8 +91,9 @@ esp_err_t touch_test_init(void)
     }
 
     err = i2c_driver_install(SPS_TOUCH_I2C_PORT, config.mode, 0, 0, 0);
-    if (err == ESP_ERR_INVALID_STATE) {
-        /* Driver already installed by display_board_ctrl_init() — OK, reuse */
+    if (err == ESP_ERR_INVALID_STATE || err == ESP_FAIL) {
+        /* Driver already installed by display_board_ctrl_init() — OK, reuse.
+         * ESP-IDF v6.0 may return ESP_FAIL or ESP_ERR_INVALID_STATE for this. */
         ESP_LOGI(TAG, "I2C driver already installed (port %d), reusing for touch",
                  SPS_TOUCH_I2C_PORT);
         err = ESP_OK;

@@ -15,6 +15,7 @@
 
 static const char *TAG = "esp8266_at";
 static bool s_uart_installed;
+static bool s_first_init = true;  /* skip GPIO toggle on reconnect */
 
 static esp_err_t uart_read_accum(char *buffer, size_t buffer_size, int timeout_ms, const char *expect)
 {
@@ -90,29 +91,31 @@ esp_err_t esp8266_at_init(void)
              SPS_ESP8266_UART_BAUD);
 
     /*
-     * GPIO TX pin verification: toggle GPIO17 as simple output.
-     * Use a multimeter to verify 0V → 3.3V → 0V on the pin.
-     * If this works but UART doesn't, the IO MUX doesn't route
-     * UART TX to this pin.
+     * GPIO TX pin verification — only on first init.
+     * On reconnects the pin is already claimed by UART, so skip.
      */
-    ESP_LOGI(TAG, "GPIO TX verification: toggling GPIO%d 3 times (0→1→0, 100ms each)",
-             SPS_ESP8266_UART_TX_GPIO);
-    gpio_config_t tx_gpio_conf = {
-        .pin_bit_mask = (1ULL << SPS_ESP8266_UART_TX_GPIO),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    };
-    gpio_config(&tx_gpio_conf);
-    for (int i = 0; i < 3; i++) {
-        gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 0);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 1);
-        vTaskDelay(pdMS_TO_TICKS(100));
+    if (s_first_init) {
+        ESP_LOGI(TAG, "GPIO TX verification: toggling GPIO%d 3 times (0→1→0, 100ms each)",
+                 SPS_ESP8266_UART_TX_GPIO);
+        gpio_config_t tx_gpio_conf = {
+            .pin_bit_mask = (1ULL << SPS_ESP8266_UART_TX_GPIO),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        };
+        gpio_config(&tx_gpio_conf);
+        for (int i = 0; i < 3; i++) {
+            gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 0);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 1); /* idle high */
+        ESP_LOGI(TAG, "GPIO toggle done");
+        s_first_init = false;
+    } else {
+        ESP_LOGI(TAG, "GPIO toggle skipped (reconnect)");
     }
-    gpio_set_level(SPS_ESP8266_UART_TX_GPIO, 1); /* idle high */
-    ESP_LOGI(TAG, "GPIO toggle done — verify with multimeter on GPIO%d: should see 3.3V now, then 0V/3.3V pulses during AT TX",
-             SPS_ESP8266_UART_TX_GPIO);
 
     uart_config_t uart_config = {
         .baud_rate = SPS_ESP8266_UART_BAUD,
