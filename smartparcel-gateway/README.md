@@ -286,3 +286,14 @@ python -m gateway.main seed-demo-gate --user-id 2 --credential-type CARD_UID \
   --credential-value CARD_UID_001 --parcel-code P20260701001 --shelf-code A03 --tag-id SPS-TAG-0001
 python -m gateway.main replace-card-demo --user-id 2 --old-card CARD_UID_001 --new-card CARD_UID_002
 ```
+### Linux 桌面开机自动启动 Gateway 与 Qt
+
+安装 Qt 依赖后，可用统一开关配置用户级自动启动：
+
+```bash
+bash scripts/gateway_qt_autostart.sh enable
+bash scripts/gateway_qt_autostart.sh status
+bash scripts/gateway_qt_autostart.sh disable
+```
+
+启用后，Gateway 通过用户级 systemd 服务运行，Qt 面板在桌面登录后自动打开。也可以从 Qt 面板“系统服务”页修改该开关。详细说明见 [Qt 面板 README](tools/gateway_qt_panel/README.md)。

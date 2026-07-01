@@ -81,6 +81,7 @@ python -m gateway.main local-api --host 127.0.0.1 --port 19000
 - 本地数据库：只读查看白名单 SQLite 表，每次最多 200 行。
 - Local API：检查 `/local/health` 和 `/local/tags`。
 - 系统服务：生成 systemd service 模板，查看服务状态，不自动安装。
+- 自动启动：通过开关创建用户级 systemd 服务，并在 Linux 桌面登录后自动打开 Qt 面板。
 - 日志：查看面板操作日志和命令输出。
 - 危险操作：备份 `.env`、备份 SQLite、导出脱敏调试报告。
 
@@ -90,6 +91,27 @@ python -m gateway.main local-api --host 127.0.0.1 --port 19000
 - 面板不长期明文展示 `GATEWAY_SECRET`、registration token 或 MQTT password。
 - 不要提交 `.env`、数据库文件、日志文件或本机 systemd 配置。
 - 当前版本不提供删除数据库、清空业务数据、重建数据库、修改网络或蓝牙系统权限。
+
+## Gateway 与 Qt 自动启动
+
+该功能适用于带 systemd 和桌面环境的 Linux 网关机。Gateway 由用户级 systemd 服务启动；Qt 面板通过 XDG Autostart 在用户进入桌面后打开。无桌面会话时 Gateway 仍可运行，但无法显示 Qt 窗口。
+
+可在面板“系统服务”页勾选“桌面登录后自动启动 Gateway 服务并打开 Qt 面板”，然后点击“应用自动启动开关”。也可直接使用：
+
+```bash
+bash scripts/gateway_qt_autostart.sh enable
+bash scripts/gateway_qt_autostart.sh status
+bash scripts/gateway_qt_autostart.sh disable
+```
+
+启用后生成用户本地文件：
+
+```text
+~/.config/systemd/user/smartparcel-gateway.service
+~/.config/autostart/smartparcel-gateway-qt.desktop
+```
+
+这些运行时文件不写入仓库，也不包含 `.env` secret。启用前需安装 `.venv`、Gateway 依赖和 PySide6，并确保用户登录时存在图形桌面会话。
 
 ## 常见问题
 
