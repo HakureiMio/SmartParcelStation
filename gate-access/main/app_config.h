@@ -79,8 +79,8 @@
  * IRQ is not used in HSU mode. RST remains disabled because many
  * breakout boards expose RSTO (an output), not a reset input. */
 #define SPS_PN532_UART_PORT         UART_NUM_2
-#define SPS_PN532_UART_TX_GPIO      GPIO_NUM_20
-#define SPS_PN532_UART_RX_GPIO      GPIO_NUM_21
+#define SPS_PN532_UART_TX_GPIO      GPIO_NUM_22
+#define SPS_PN532_UART_RX_GPIO      GPIO_NUM_23
 #define SPS_PN532_UART_BAUD         115200
 #define SPS_PN532_UART_BUF_SIZE     512
 #define SPS_PN532_UART_TIMEOUT_MS   1200

@@ -94,7 +94,8 @@ static esp_err_t uart_read_exact(uint8_t *buffer, size_t length, int timeout_ms)
     return received == length ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
-static esp_err_t uart_find_sequence(const uint8_t *sequence, size_t sequence_len, int timeout_ms)
+static esp_err_t uart_find_sequence(const uint8_t *sequence, size_t sequence_len,
+                                    int timeout_ms, bool log_timeout)
 {
     size_t matched = 0;
     uint8_t received[32] = {0};
@@ -117,6 +118,9 @@ static esp_err_t uart_find_sequence(const uint8_t *sequence, size_t sequence_len
             matched = byte == sequence[0] ? 1 : 0;
         }
     }
+    if (!log_timeout) {
+        return ESP_ERR_TIMEOUT;
+    }
     if (received_len > 0) {
         ESP_LOGW(TAG, "PN532 UART received %u byte(s), but expected sequence was absent:",
                  (unsigned)received_len);
@@ -129,7 +133,8 @@ static esp_err_t uart_find_sequence(const uint8_t *sequence, size_t sequence_len
 
 static esp_err_t pn532_read_ack(void)
 {
-    return uart_find_sequence(PN532_ACK, sizeof(PN532_ACK), SPS_PN532_UART_TIMEOUT_MS);
+    return uart_find_sequence(PN532_ACK, sizeof(PN532_ACK),
+                              SPS_PN532_UART_TIMEOUT_MS, true);
 }
 
 static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
@@ -176,8 +181,16 @@ static esp_err_t pn532_send_command(const uint8_t *cmd, size_t cmd_len)
 static esp_err_t pn532_read_response(uint8_t expected_cmd, uint8_t *payload, size_t payload_size, size_t *payload_len)
 {
     const uint8_t start_code[] = {PN532_PREAMBLE, PN532_STARTCODE1, PN532_STARTCODE2};
-    ESP_RETURN_ON_ERROR(uart_find_sequence(start_code, sizeof(start_code), SPS_PN532_UART_TIMEOUT_MS),
-                        TAG, "PN532 response timeout");
+    bool quiet_no_card_timeout = expected_cmd == PN532_CMD_IN_LIST;
+    esp_err_t start_err = uart_find_sequence(start_code, sizeof(start_code),
+                                             SPS_PN532_UART_TIMEOUT_MS,
+                                             !quiet_no_card_timeout);
+    if (start_err != ESP_OK) {
+        if (!quiet_no_card_timeout) {
+            ESP_LOGE(TAG, "PN532 response timeout");
+        }
+        return start_err;
+    }
 
     uint8_t header[2] = {0};
     ESP_RETURN_ON_ERROR(uart_read_exact(header, sizeof(header), 100), TAG,
