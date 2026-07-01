@@ -1,5 +1,15 @@
 # SmartParcel MiniProgram
 
+## 用户门禁认证与 NFC 边界
+
+用户端有三种门禁入口：扫描门禁屏幕二维码；手机读取门禁 NFC 标签；直接在门禁设备刷实体卡（该方式不经过小程序）。扫码或 NFC 请求提交后，小程序只显示“认证已提交，请查看门禁屏幕”，最终放行结果由 gateway 判断并由门禁屏幕显示。
+
+门禁 NFC 标签用于请求开门，payload 为 `sps://gate-nfc`；包裹 NFC 标签用于确认取件，payload 为 `sps://pickup`。两者用途、字段和接口不同，不能混用。
+
+安全边界：小程序只保存用户 Bearer token，不保存 `gateway_secret`、`reader_token` 或 `ADMIN_BOOTSTRAP_TOKEN`。
+
+完整演示顺序、账号和 curl 等价请求见 [三种门禁认证端到端演示](../docs/demo_three_gate_auth_methods.md)。用户还可在小程序中查看包裹、报失卡，并通过手动按钮或包裹 NFC 标签确认取件。
+
 ## 1. 小程序定位
 
 `smartparcel-miniprogram` 是 SmartParcelStation 的微信小程序，负责用户端和员工端交互。它不是业务主数据中心，也不保存高敏 secret。

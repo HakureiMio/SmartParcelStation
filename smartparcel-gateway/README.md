@@ -1,5 +1,7 @@
 # SmartParcel Gateway
 
+> 最终门禁演示入口：gateway 保存本地凭证和包裹缓存，对 `CARD_UID`、`GATE_NFC_TAG`、`GATE_QR` 作最终放行判断，并缓存门禁屏幕轮询结果。完整 sync-pull 与 local API 操作见 [端到端演示文档](../docs/demo_three_gate_auth_methods.md)。
+
 SmartParcel 站点本地网关 —— 负责 BLE 标签控制、本地 SQLite 缓存、
 server 同步、门禁认证和员工小程序本地 API。
 

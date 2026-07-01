@@ -1,5 +1,7 @@
 # SmartParcel Server
 
+> 最终门禁演示入口：server 负责账号、包裹、卡绑定/补办、认证请求与同步事件，但不直接绕过 gateway 放行。初始化、登录、NFC/QR 门禁和取件确认命令见 [端到端演示文档](../docs/demo_three_gate_auth_methods.md)。
+
 ## 1. server 职责
 
 `smartparcel-server` 是 SmartParcelStation 的中心服务端，提供 `/api/v1` REST API，负责账号、站点、网关注册、中心包裹、通知、同步审计和异常摘要。

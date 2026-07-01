@@ -1,5 +1,19 @@
 # SmartParcelStation
 
+## 门禁与 NFC 文档索引
+
+- [门禁认证设计](docs/gate_auth_design.md)
+- [NFC 标签与门禁卡 payload 契约](docs/nfc_tag_payloads.md)
+- [三种门禁认证方式端到端演示](docs/demo_three_gate_auth_methods.md)
+
+## 最终演示闭环
+
+当前演示贯通五端：server 管理账号、包裹、凭证和同步事件；gateway 缓存本地数据并最终判断门禁认证；小程序提供用户扫码、NFC 门禁和取件确认；gate-access 读取卡 UID、显示 QR 与认证结果；nRF52810 标签通过 BLE/GATT 提供寻物反馈。
+
+三种门禁识别方式为 `CARD_UID`、`GATE_NFC_TAG` 和 `GATE_QR`。补办新卡时旧卡变为 `REPLACED`，同步后不能再开门；取件可通过手动按钮或 `sps://pickup` NFC 标签确认。用户没有 `WAITING_PICKUP` 包裹时，三种认证方式均拒绝。
+
+安全边界：server 不直接绕过 gateway 放行；gateway 最终判断是否有待取包裹；gate-access 不保存用户 token；小程序不保存 `gateway_secret` 或 `reader_token`；NFC 标签不保存用户隐私；`LOST / REPLACED / DISABLED` 卡不能开门。
+
 ## 1. 项目简介
 
 SmartParcelStation 是面向小型快递站的毕业设计原型系统，用于验证“员工小程序、站点本地网关、智能寻物标签、中心服务端”之间的协作关系。当前仓库定位是局域网验证和硬件闭环演示，不是生产级系统。

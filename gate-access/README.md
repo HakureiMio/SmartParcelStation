@@ -1,5 +1,17 @@
 # gate-access
 
+## NFC 与固件职责边界
+
+`gate-access` 不写 NFC 标签。它通过 PN532 读取用户实体卡 UID，从 gateway 获取 QR payload 并显示二维码，同时轮询 gateway 获取认证结果。门禁 NFC 标签需要提前写入以下 NDEF URI，并将 NTAG213/NTAG215 贴在门禁设备旁：
+
+```text
+sps://gate-nfc?v=1&gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+门禁 NFC 标签用于请求开门；包裹取件 NFC 标签使用 `sps://pickup`，仅用于确认取件。两种标签不能混用。本节仅补充文档，没有改变 ESP32-P4、屏幕、PN532、ESP8266、GPIO、UART、I2C 或时序配置。
+
+三种认证的最终联调步骤见 [端到端演示文档](../docs/demo_three_gate_auth_methods.md)。固件只读取 UID、显示 gateway 提供的二维码、轮询并显示认证结果；不保存用户 token，也不自行判断待取包裹。
+
 `gate-access` 是 SmartParcelStation 的门禁读卡器固件子工程，使用 ESP-IDF，不使用 Arduino。
 
 当前硬件组合：

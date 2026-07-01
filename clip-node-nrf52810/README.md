@@ -1,5 +1,9 @@
 # clip-node-nrf52810
 
+> 边界说明：`clip-node-nrf52810` 是 BLE 智能寻物标签，不是门禁 NFC 标签。它负责 BLE 广播、GATT 命令、RGB 闪烁、状态读取和电池状态。门禁 NFC 标签和包裹取件 NFC 标签均为外贴 NTAG213/NTAG215，分别使用 `sps://gate-nfc` 与 `sps://pickup` payload，不能混用。本说明不改变现有 BLE/GATT 协议或硬件配置。
+
+完整五端演示及 BLE 标签在其中的职责见 [端到端演示文档](../docs/demo_three_gate_auth_methods.md)。
+
 ## 1. 项目说明
 
 `clip-node-nrf52810` 是 SmartParcelStation 项目的 nRF52810 夹具节点固件工程。
@@ -182,4 +186,3 @@ q
 2. 蜂鸣器业务代码已保留，但当前版本默认禁用其联动调用。
 3. 当前优先目标是 BLE 通路、RGB 指示、状态读写与基础硬件稳定性。
 4. `nRF52810` RAM 较小，恢复更多功能前需要持续控制内存占用。
-
