@@ -71,9 +71,12 @@ Page({
       authService.saveSession(data)
       wx.showToast({ title: '登录成功', icon: 'success' })
 
+      const pendingGateNfc = wx.getStorageSync('pending_gate_nfc_auth')
       const target = data.role === 'staff'
         ? '/pages/staff-home/staff-home'
-        : '/pages/user-home/user-home'
+        : (pendingGateNfc
+            ? '/pages/gate-nfc-auth/gate-nfc-auth'
+            : '/pages/user-home/user-home')
 
       setTimeout(() => wx.redirectTo({ url: target }), 250)
     }).catch(() => {

@@ -14,6 +14,15 @@ def build_parser() -> argparse.ArgumentParser:
     gate.add_argument("--station-id", required=True)
     gate.add_argument("--gate-nfc-tag-id", required=True)
 
+    wechat_link = subparsers.add_parser("gate-wechat-link", help="echo a WeChat Mini Program URL Link")
+    wechat_link.add_argument("--url-link", required=True)
+
+    wechat_query = subparsers.add_parser("gate-wechat-query", help="generate the URL Link page query")
+    wechat_query.add_argument("--gateway-code", required=True)
+    wechat_query.add_argument("--reader-id", required=True)
+    wechat_query.add_argument("--station-id", required=True)
+    wechat_query.add_argument("--gate-nfc-tag-id", required=True)
+
     pickup = subparsers.add_parser("pickup", help="generate a parcel pickup NFC tag URI")
     pickup.add_argument("--tag-id", required=True)
     pickup.add_argument("--pickup-binding-id", required=True)
@@ -34,7 +43,7 @@ def main() -> None:
             }
         )
         print(f"sps://gate-nfc?{query}")
-    else:
+    elif args.payload_type == "pickup":
         query = urlencode(
             {
                 "v": "1",
@@ -44,6 +53,21 @@ def main() -> None:
             }
         )
         print(f"sps://pickup?{query}")
+    elif args.payload_type == "gate-wechat-link":
+        if not args.url_link.startswith("https://"):
+            raise SystemExit("gate-wechat-link requires an https:// URL Link")
+        print(args.url_link)
+    else:
+        print(
+            urlencode(
+                {
+                    "gateway_code": args.gateway_code,
+                    "reader_id": args.reader_id,
+                    "station_id": args.station_id,
+                    "gate_nfc_tag_id": args.gate_nfc_tag_id,
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

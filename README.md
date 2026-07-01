@@ -14,6 +14,8 @@
 
 安全边界：server 不直接绕过 gateway 放行；gateway 最终判断是否有待取包裹；gate-access 不保存用户 token；小程序不保存 `gateway_secret` 或 `reader_token`；NFC 标签不保存用户隐私；`LOST / REPLACED / DISABLED` 卡不能开门。
 
+门禁 NFC 演示支持两种入口：写入 `sps://gate-nfc` 后在小程序内读取，或将微信 URL Link 写入标签，碰标签后直接进入 `pages/gate-nfc-auth/gate-nfc-auth` 并自动提交认证。URL Link 只携带 gateway、reader、station 和标签编号，用户身份始终来自小程序登录 token。
+
 ## 1. 项目简介
 
 SmartParcelStation 是面向小型快递站的毕业设计原型系统，用于验证“员工小程序、站点本地网关、智能寻物标签、中心服务端”之间的协作关系。当前仓库定位是局域网验证和硬件闭环演示，不是生产级系统。

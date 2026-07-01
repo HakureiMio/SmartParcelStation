@@ -85,6 +85,12 @@ function parseQueryUri(raw, prefix, type) {
 function parseSpsPayload(raw) {
   if (!raw) return { ok: false, reason: 'payload 为空' }
   if (typeof raw !== 'string') return { ok: true, parsed: raw }
+  if (/^https:\/\//i.test(raw.trim())) {
+    return {
+      ok: false,
+      reason: '检测到 HTTPS/微信 URL Link 标签。请直接用手机系统触碰标签打开小程序，或将标签改写为 sps://gate-nfc 演示格式。'
+    }
+  }
   try { return { ok: true, parsed: JSON.parse(raw) } } catch (_) {}
   const parsed = parseQueryUri(raw, 'sps://gate-qr?', 'SPS_GATE_QR') ||
     parseQueryUri(raw, 'sps://gate-nfc?', 'SPS_GATE_NFC') ||

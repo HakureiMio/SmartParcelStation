@@ -98,6 +98,24 @@ curl -i -H 'X-Gate-Reader-Id: GATE01' -H "X-Gate-Reader-Token: ${GATE_READER_TOK
 
 预期 `GRANTED`、`pickup_count=2`。
 
+### URL Link 直接启动模式
+
+在微信平台生成 URL Link，目标页面为：
+
+```text
+pages/gate-nfc-auth/gate-nfc-auth
+```
+
+页面 query：
+
+```text
+gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+把生成后的 `https://wxaurl.cn/xxxxxxxx` 作为 NDEF URI 写入 NTAG213/NTAG215。手机系统读取标签后打开微信小程序；页面从启动参数取门禁信息，并使用当前登录用户 token 自动提交认证。若未登录，参数保存在 `pending_gate_nfc_auth`，客户登录后返回门禁页自动继续。小程序只显示“认证已提交，请查看门禁屏幕”。
+
+演示前人工填写：微信小程序 AppID、上述页面路径与 query、生成后的 URL Link、可访问的 `serverBaseUrl`，并确认用户已登录或可以完成登录。URL Link 过期时重新生成并重写 NFC 标签。
+
 ## 11. 演示方式三：扫描门禁屏幕二维码
 
 先取得真实 session：

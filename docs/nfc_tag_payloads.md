@@ -73,3 +73,25 @@ sps://pickup?v=1&tag_id=SPS-TAG-0001&binding=PB-0001&token=DEMO-TOKEN-0001
 | BLE 智能标签 | Gateway BLE | 寻物提醒 | GATT | 否 | 不用于开门 |
 
 `clip-node-nrf52810` 是 BLE 智能寻物标签，负责广播、GATT、RGB、状态和电池信息；它不是上述两种 NFC 标签，也不直接参与门禁用户身份识别。
+
+## 5. 门禁 NFC 的两种演示写法
+
+开发演示 A（小程序内读取）：标签写入以下 NDEF URI，用户先打开小程序，再进入 NFC 门禁页读取标签。
+
+```text
+sps://gate-nfc?v=1&gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+开发演示 B（碰标签直接打开小程序）：标签写入微信生成的 URL Link，例如：
+
+```text
+https://wxaurl.cn/xxxxxxxx
+```
+
+URL Link 指向 `pages/gate-nfc-auth/gate-nfc-auth`，并携带 query：
+
+```text
+gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+URL Link 与 query 中不得包含 `user_id`、用户隐私、`gateway_secret`、`reader_token` 或 AppSecret。用户身份仅来自小程序当前 Bearer token。演示阶段 URL Link 过期后需重新生成并重写标签；正式产品更适合使用 HTTPS 中转页，本阶段不实现中转页。

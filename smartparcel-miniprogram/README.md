@@ -10,6 +10,16 @@
 
 完整演示顺序、账号和 curl 等价请求见 [三种门禁认证端到端演示](../docs/demo_three_gate_auth_methods.md)。用户还可在小程序中查看包裹、报失卡，并通过手动按钮或包裹 NFC 标签确认取件。
 
+### 微信 URL Link 门禁标签演示
+
+可将微信生成的 `https://wxaurl.cn/xxxxxxxx` 直接写入 NTAG213/NTAG215。URL Link 目标页面为 `pages/gate-nfc-auth/gate-nfc-auth`，query 为：
+
+```text
+gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+页面参数只描述门禁，不包含 `user_id` 或任何 secret。页面使用当前登录用户 token 自动提交；未登录时保存 pending 参数，登录后回到门禁页继续。URL Link 过期后需重新生成并重写标签。原有 `sps://gate-nfc` 小程序内读取模式继续保留。
+
 ## 1. 小程序定位
 
 `smartparcel-miniprogram` 是 SmartParcelStation 的微信小程序，负责用户端和员工端交互。它不是业务主数据中心，也不保存高敏 secret。
