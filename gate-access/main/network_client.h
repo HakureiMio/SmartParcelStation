@@ -14,3 +14,6 @@ esp_err_t network_client_http_post_json(
     char *response,
     size_t response_size,
     int *http_status);
+esp_err_t network_client_http_get(
+    const char *host, int port, const char *path,
+    char *response, size_t response_size, int *http_status);

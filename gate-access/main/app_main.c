@@ -20,6 +20,40 @@ static const char *TAG = "sps_gate";
 
 #define SPS_STANDBY_COLOR_RGB565 0x07FF
 
+typedef enum {
+    GATE_BOOTING, GATE_WIFI_CONNECTING, GATE_READY, GATE_CARD_READING,
+    GATE_QR_READY, GATE_WAITING_GATE_AUTH, GATE_GRANTED, GATE_DENIED, GATE_ERROR,
+} gate_ui_state_t;
+
+static const char *gate_state_name(gate_ui_state_t state)
+{
+    static const char *names[] = {"BOOTING", "WIFI_CONNECTING", "READY", "CARD_READING",
+        "QR_READY", "WAITING_GATE_AUTH", "GRANTED", "DENIED", "ERROR"};
+    return names[state];
+}
+
+static void set_gate_state(gate_ui_state_t state, const gateway_access_result_t *result)
+{
+    ESP_LOGI(TAG, "STATE -> %s", gate_state_name(state));
+    if (state == GATE_GRANTED || state == GATE_DENIED || state == GATE_ERROR) {
+        display_ui_show_gate_state(gate_state_name(state), result);
+    }
+}
+
+static esp_err_t refresh_gate_qr(void)
+{
+    gateway_qr_session_t qr = {0};
+    esp_err_t err = gateway_client_fetch_qr_session(&qr);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "QR session refresh failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_RETURN_ON_ERROR(display_ui_show_qr(qr.qr_payload), TAG, "render QR failed");
+    set_gate_state(GATE_QR_READY, NULL);
+    ESP_LOGI(TAG, "QR caption: WeChat scan to open / or card / or phone NFC gate tag");
+    return ESP_OK;
+}
+
 /* ── NVS init ───────────────────────────────────────────────── */
 
 static esp_err_t init_nvs(void)
@@ -438,6 +472,7 @@ static void run_hardware_test(void)
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32P4 boot");
+    set_gate_state(GATE_BOOTING, NULL);
 
 #if SPS_DIAG_PN532_ONLY
     ESP_LOGI(TAG, "=== PN532 DIAGNOSTIC MODE (SPS_DIAG_PN532_ONLY=1) ===");
@@ -466,10 +501,12 @@ void app_main(void)
 
     display_ui_show_network_status("ESP8266 init...");
     display_ui_show_network_status("Connecting...");
+    set_gate_state(GATE_WIFI_CONNECTING, NULL);
     esp_err_t net_err = network_client_start();
     if (net_err == ESP_OK) {
         display_ui_show_network_status("WiFi ready");
         display_ui_show_network_status("Gateway ready");
+        set_gate_state(GATE_READY, NULL);
     } else {
         display_ui_show_error("Network error", esp_err_to_name(net_err));
     }
@@ -484,7 +521,11 @@ void app_main(void)
 
     char last_uid[32] = {0};
     TickType_t last_uid_tick = 0;
+    TickType_t last_auth_poll_tick = 0;
+    TickType_t last_qr_refresh_tick = 0;
+    char last_auth_status[24] = {0};
     display_ui_show_wait_card();
+    if (net_err == ESP_OK && refresh_gate_qr() == ESP_OK) last_qr_refresh_tick = xTaskGetTickCount();
 
     while (true) {
         if (net_err != ESP_OK) {
@@ -527,18 +568,44 @@ void app_main(void)
 
             if (should_upload_uid(uid_hex, last_uid, &last_uid_tick)) {
                 strlcpy(last_uid, uid_hex, sizeof(last_uid));
+                set_gate_state(GATE_CARD_READING, NULL);
                 display_ui_show_uploading();
 
                 gateway_access_result_t result = {0};
                 esp_err_t post_err = gateway_client_post_access_card(uid_hex, &result);
                 if (post_err == ESP_OK) {
                     display_ui_show_access_result(&result);
+                    set_gate_state(result.access_granted ? GATE_GRANTED : GATE_DENIED, &result);
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    if (refresh_gate_qr() == ESP_OK) last_qr_refresh_tick = xTaskGetTickCount();
                 } else {
                     ESP_LOGE(TAG, "Gateway request failed: %s", esp_err_to_name(post_err));
                     display_ui_show_error("Network error", esp_err_to_name(post_err));
                     net_err = network_client_wait_ready();
                 }
             }
+        }
+
+        TickType_t now_tick = xTaskGetTickCount();
+        if (net_err == ESP_OK && (now_tick - last_auth_poll_tick) >= pdMS_TO_TICKS(SPS_GATE_AUTH_POLL_MS)) {
+            last_auth_poll_tick = now_tick;
+            gateway_access_result_t auth = {0};
+            if (gateway_client_poll_auth_result(&auth) == ESP_OK) {
+                const char *status = auth.status[0] ? auth.status : (auth.access_granted ? "GRANTED" : "PENDING");
+                if ((strcmp(status, "GRANTED") == 0 || strcmp(status, "DENIED") == 0) &&
+                    strcmp(status, last_auth_status) != 0) {
+                    strlcpy(last_auth_status, status, sizeof(last_auth_status));
+                    set_gate_state(strcmp(status, "GRANTED") == 0 ? GATE_GRANTED : GATE_DENIED, &auth);
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    if (refresh_gate_qr() == ESP_OK) last_qr_refresh_tick = xTaskGetTickCount();
+                } else if (strcmp(status, "PENDING") == 0 || strcmp(status, "EXPIRED") == 0) {
+                    last_auth_status[0] = '\0';
+                    set_gate_state(GATE_WAITING_GATE_AUTH, NULL);
+                }
+            }
+        }
+        if (net_err == ESP_OK && (xTaskGetTickCount() - last_qr_refresh_tick) >= pdMS_TO_TICKS(SPS_QR_REFRESH_MS)) {
+            if (refresh_gate_qr() == ESP_OK) last_qr_refresh_tick = xTaskGetTickCount();
         }
 
         vTaskDelay(pdMS_TO_TICKS(SPS_CARD_POLL_INTERVAL_MS));

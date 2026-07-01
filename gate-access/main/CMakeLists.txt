@@ -9,6 +9,7 @@ idf_component_register(
         "display_ui.c"
         "display_board_ctrl.c"
         "touch_test.c"
+        "qrcodegen.c"
     INCLUDE_DIRS "."
     REQUIRES
         driver
@@ -22,3 +23,7 @@ idf_component_register(
         nvs_flash
         espressif__cjson
 )
+
+# Upstream qrcodegen contains defensive enum lower-bound assertions that some
+# embedded GCC versions diagnose as always true.
+set_source_files_properties(qrcodegen.c PROPERTIES COMPILE_OPTIONS "-Wno-type-limits")

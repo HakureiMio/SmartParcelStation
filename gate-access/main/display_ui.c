@@ -2,6 +2,8 @@
 
 #include <inttypes.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "app_config.h"
 #include "display_board_ctrl.h"
@@ -16,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "qrcodegen.h"
 
 static const char *TAG = "display_ui";
 
@@ -563,6 +566,64 @@ esp_err_t display_ui_show_card_id_numeric(const char *uid_hex)
         ESP_LOGE(TAG, "draw card ID failed: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+esp_err_t display_ui_show_qr(const char *payload)
+{
+    ESP_RETURN_ON_FALSE(s_panel != NULL && s_color_buffer != NULL && payload != NULL,
+                        ESP_ERR_INVALID_STATE, TAG, "display/QR payload unavailable");
+    const size_t qr_buffer_len = qrcodegen_BUFFER_LEN_FOR_VERSION(20);
+    uint8_t *temp = heap_caps_malloc(qr_buffer_len, MALLOC_CAP_8BIT);
+    uint8_t *qr = heap_caps_malloc(qr_buffer_len, MALLOC_CAP_8BIT);
+    ESP_RETURN_ON_FALSE(temp != NULL && qr != NULL, ESP_ERR_NO_MEM, TAG, "allocate QR buffers failed");
+    bool encoded = qrcodegen_encodeText(payload, temp, qr, qrcodegen_Ecc_MEDIUM,
+                                         qrcodegen_VERSION_MIN, 20, qrcodegen_Mask_AUTO, true);
+    if (!encoded) {
+        free(temp); free(qr);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    int size = qrcodegen_getSize(qr);
+    const int quiet = 4;
+    int scale = 400 / (size + quiet * 2);
+    if (scale < 1) scale = 1;
+    int pixels = (size + quiet * 2) * scale;
+    int origin_x = (SPS_DISPLAY_WIDTH - pixels) / 2;
+    int origin_y = (SPS_DISPLAY_HEIGHT - pixels) / 2;
+    xSemaphoreTake(s_framebuffer_mutex, portMAX_DELAY);
+    fill_color_buffer(0xFFFF);
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            if (!qrcodegen_getModule(qr, x, y)) continue;
+            int px0 = origin_x + (x + quiet) * scale;
+            int py0 = origin_y + (y + quiet) * scale;
+            for (int dy = 0; dy < scale; ++dy)
+                for (int dx = 0; dx < scale; ++dx)
+                    s_color_buffer[(py0 + dy) * SPS_DISPLAY_WIDTH + px0 + dx] = 0x0000;
+        }
+    }
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, SPS_DISPLAY_WIDTH,
+                                               SPS_DISPLAY_HEIGHT, s_color_buffer);
+    xSemaphoreGive(s_framebuffer_mutex);
+    free(temp); free(qr);
+    ESP_LOGI(TAG, "QR_READY: matrix=%dx%d scale=%d; caption: WeChat scan / card / gate NFC", size, size, scale);
+    return err;
+}
+
+void display_ui_show_gate_state(const char *state, const gateway_access_result_t *result)
+{
+    uint16_t color = 0x07FF;
+    if (state != NULL && strcmp(state, "GRANTED") == 0) color = 0x07E0;
+    else if (state != NULL && strcmp(state, "DENIED") == 0) color = 0xF800;
+    else if (state != NULL && strcmp(state, "ERROR") == 0) color = 0xFFE0;
+    display_ui_fill_color(color, state == NULL ? "READY" : state);
+    ESP_LOGI(TAG, "UI state=%s text=%s pickup_count=%d shelves=%s parcels=%s reason=%s color=%s",
+             state == NULL ? "READY" : state,
+             result != NULL ? result->display_text : "",
+             result != NULL ? result->pickup_count : 0,
+             result != NULL ? result->shelves : "",
+             result != NULL ? result->parcel_codes : "",
+             result != NULL ? result->reason : "",
+             result != NULL ? result->session_color : "");
 }
 
 /* ── UI text helpers (log-only for now) ────────────────────── */

@@ -94,6 +94,8 @@ esp_err_t network_client_http_post_json(
         "POST %s HTTP/1.1\r\n"
         "Host: %s:%d\r\n"
         "Content-Type: application/json\r\n"
+        "X-Gate-Reader-Id: %s\r\n"
+        "X-Gate-Reader-Token: %s\r\n"
         "Content-Length: %u\r\n"
         "Connection: close\r\n"
         "\r\n"
@@ -101,6 +103,8 @@ esp_err_t network_client_http_post_json(
         path,
         host,
         port,
+        SPS_READER_ID,
+        SPS_READER_TOKEN,
         (unsigned)strlen(json),
         json);
     if (request_len < 0 || request_len >= (int)sizeof(request)) {
@@ -120,5 +124,33 @@ esp_err_t network_client_http_post_json(
     *http_status = parse_http_status(raw);
     copy_http_body(raw, response, response_size);
     ESP_LOGI(TAG, "HTTP status=%d, body=%s", *http_status, response);
+    return *http_status > 0 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+esp_err_t network_client_http_get(
+    const char *host, int port, const char *path,
+    char *response, size_t response_size, int *http_status)
+{
+    if (host == NULL || path == NULL || response == NULL || response_size == 0 || http_status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_network_ready) return ESP_ERR_INVALID_STATE;
+    char request[768] = {0};
+    int request_len = snprintf(request, sizeof(request),
+        "GET %s HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n"
+        "X-Gate-Reader-Id: %s\r\nX-Gate-Reader-Token: %s\r\n\r\n",
+        path, host, port, SPS_READER_ID, SPS_READER_TOKEN);
+    if (request_len < 0 || request_len >= (int)sizeof(request)) return ESP_ERR_INVALID_SIZE;
+    char raw[SPS_HTTP_RESPONSE_MAX] = {0};
+    ESP_LOGI(TAG, "GET %s", path);
+    esp_err_t err = esp8266_at_tcp_transact(host, port, request, (size_t)request_len, raw, sizeof(raw));
+    if (err != ESP_OK) {
+        s_network_ready = false;
+        ESP_LOGE(TAG, "HTTP GET over ESP8266 failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    *http_status = parse_http_status(raw);
+    copy_http_body(raw, response, response_size);
+    ESP_LOGI(TAG, "HTTP status=%d", *http_status);
     return *http_status > 0 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }

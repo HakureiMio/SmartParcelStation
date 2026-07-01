@@ -65,7 +65,7 @@ static esp_err_t uart_read_accum(char *buffer, size_t buffer_size, int timeout_m
 static esp_err_t at_command(const char *cmd, const char *expect, int timeout_ms)
 {
     char response[512] = {0};
-    ESP_LOGI(TAG, "AT -> %s", cmd);
+    ESP_LOGI(TAG, "AT -> %s", strncmp(cmd, "AT+CWJAP=", 9) == 0 ? "AT+CWJAP=<redacted>" : cmd);
     uart_flush_input(SPS_ESP8266_UART_PORT);
     int written = uart_write_bytes(SPS_ESP8266_UART_PORT, cmd, strlen(cmd));
     if (written != (int)strlen(cmd) || uart_write_bytes(SPS_ESP8266_UART_PORT, "\r\n", 2) != 2) {

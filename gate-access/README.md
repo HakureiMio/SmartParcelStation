@@ -284,3 +284,97 @@ python -m gateway.main register-nfc-credential --credential-type CARD_UID --cred
 ```
 
 请把 `04A1B2C3D4` 替换成固件串口日志打印的真实 UID。
+# Stage 4: gate reader firmware
+
+## Hardware
+
+- ESP32-P4 drives the 480×640 ST7701S MIPI-DSI display.
+- ESP8266 AT firmware is connected over UART1 and joins the gateway AP.
+- PN532 is connected in HSU mode over UART2. UID bytes are converted to uppercase hexadecimal
+  without separators, for example `04A1B2C3D4`.
+- A separate NTAG213/NTAG215 should be attached beside the gate for phone NFC authentication.
+
+Check `docs/pin_mapping.md` before wiring. The PN532 mode switches must be set to HSU before power-on.
+
+## Configuration
+
+Demo defaults in `main/app_config.h` are deliberately non-personal:
+
+```c
+#define SPS_WIFI_SSID       "SPS_GATEWAY_AP"
+#define SPS_WIFI_PASSWORD   "12345678"
+#define SPS_READER_ID       "GATE01"
+#define SPS_READER_TOKEN    "change-this-reader-token"
+#define SPS_GATEWAY_HOST    "192.168.4.1"
+#define SPS_GATEWAY_PORT    19000
+```
+
+Change the reader token for deployment, but never commit a real Wi-Fi password or reader token.
+The token is inserted into HTTP headers and is never printed by the firmware. ESP8266 `CWJAP`
+logging is redacted so the Wi-Fi password does not appear in serial logs.
+
+## Three authentication flows
+
+### Card
+
+PN532 reads the UID and applies a 3000 ms duplicate-card debounce. Firmware sends:
+
+```http
+POST /local/gate/access-card HTTP/1.1
+X-Gate-Reader-Id: GATE01
+X-Gate-Reader-Token: <reader-token>
+Content-Type: application/json
+
+{"reader_id":"GATE01","credential_type":"CARD_UID","credential_value":"04A1B2C3D4"}
+```
+
+### QR
+
+Firmware fetches `/local/gate/qr-session?reader_id=GATE01`, encodes `qr_payload` locally with the
+vendored MIT-licensed Project Nayuki `qrcodegen` C library, and draws the matrix centered on the
+RGB565 framebuffer. No network image is used. The current custom framebuffer UI has no complete
+CJK font; the three-line caption is emitted to serial as `WeChat scan / card / gate NFC` while the
+screen displays the QR matrix.
+
+### Gate NFC tag
+
+Firmware does not write the static tag. Program an NTAG213/NTAG215 with an NDEF URI such as:
+
+```text
+sps://gate-nfc?v=1&gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001
+```
+
+The mini program reads this tag and submits user authentication to the server. Firmware observes
+the result through the same gateway polling endpoint as QR authentication.
+
+## Result polling and UI state
+
+Every second firmware calls `/local/gate/auth-result?reader_id=GATE01` with reader headers. Both
+`access=GRANTED/DENIED` and `status=GRANTED/DENIED` responses are accepted. It parses reason,
+display text, pickup count, shelves, parcel codes, session color and warnings.
+
+```text
+BOOTING -> WIFI_CONNECTING -> READY -> QR_READY
+                                  |-> CARD_READING -> GRANTED / DENIED -> QR_READY
+QR_READY -> WAITING_GATE_AUTH -> GRANTED / DENIED -> QR_READY
+                                  `-> ERROR
+```
+
+GRANTED uses a green screen, DENIED red, and ERROR yellow. Detailed package/shelf text is logged;
+the custom display layer currently renders status colors and QR, with full text awaiting a CJK font.
+
+## Build and flash
+
+```bash
+idf.py set-target esp32p4
+idf.py build
+idf.py -p COMx flash monitor
+```
+
+Common failures:
+
+- PN532 timeout: verify HSU switches, crossed TX/RX, common ground and stable 3.3 V power.
+- ESP8266 join failure: verify AP SSID/password and independent power supply.
+- HTTP 401: reader ID/token must match the gateway configuration.
+- QR not visible: verify PSRAM framebuffer allocation, ST7701S timings and PCA9536 backlight/reset.
+- Always rebuild locally rather than sharing build logs, which can retain old configuration strings.

@@ -28,8 +28,8 @@
  * 默认：PN532 独立诊断
  */
 #define SPS_DIAG_PN532_ONLY             0
-#define SPS_DEMO_DISPLAY_FIRST          1
-#define SPS_DEMO_TOUCH_COLOR_TEST       1
+#define SPS_DEMO_DISPLAY_FIRST          0
+#define SPS_DEMO_TOUCH_COLOR_TEST       0
 #define SPS_DEMO_FORCE_WHITE_SCREEN     0
 #define SPS_DEMO_WIFI_ENABLE            1
 #define SPS_DEMO_PN532_UID_TEST         1
@@ -39,11 +39,16 @@
 #define SPS_GATEWAY_HOST            "192.168.4.1"
 #define SPS_GATEWAY_PORT            19000
 #define SPS_GATEWAY_PATH            "/local/gate/access-card"
+#define SPS_GATEWAY_QR_PATH         "/local/gate/qr-session?reader_id=" SPS_READER_ID
+#define SPS_GATEWAY_AUTH_PATH       "/local/gate/auth-result?reader_id=" SPS_READER_ID
 #define SPS_GATEWAY_URL             "http://192.168.4.1:19000"
 
 #define SPS_WIFI_SSID               "Galaxy zflip 7"
 #define SPS_WIFI_PASSWORD           "zjtzjt666"
 #define SPS_READER_ID               "GATE01"
+#define SPS_READER_TOKEN            "change-this-reader-token"
+#define SPS_GATE_AUTH_POLL_MS       1000
+#define SPS_QR_REFRESH_MS           45000
 
 /* ── ESP8266 UART ────────────────────────────────────────────────
  *

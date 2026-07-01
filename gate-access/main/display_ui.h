@@ -8,6 +8,8 @@
 esp_err_t display_ui_init(void);
 esp_err_t display_ui_fill_color(uint16_t rgb565, const char *name);
 esp_err_t display_ui_show_card_id_numeric(const char *uid_hex);
+esp_err_t display_ui_show_qr(const char *payload);
+void display_ui_show_gate_state(const char *state, const gateway_access_result_t *result);
 void display_ui_show_booting(void);
 void display_ui_show_network_status(const char *text);
 void display_ui_show_pn532_status(const char *text);

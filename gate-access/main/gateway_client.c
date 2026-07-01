@@ -65,7 +65,27 @@ static bool parse_access_value(cJSON *root)
         return cJSON_IsTrue(allowed);
     }
 
+    cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+    if (cJSON_IsString(status) && status->valuestring != NULL) {
+        return strcasecmp(status->valuestring, "granted") == 0;
+    }
+
     return false;
+}
+
+static void stringify_array(cJSON *root, const char *name, char *dest, size_t dest_size)
+{
+    dest[0] = '\0';
+    cJSON *array = cJSON_GetObjectItemCaseSensitive(root, name);
+    if (!cJSON_IsArray(array)) return;
+    size_t used = 0;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, array) {
+        if (!cJSON_IsString(item)) continue;
+        int n = snprintf(dest + used, dest_size - used, "%s%s", used ? " " : "", item->valuestring);
+        if (n < 0 || (size_t)n >= dest_size - used) break;
+        used += (size_t)n;
+    }
 }
 
 static void parse_gateway_response(const char *body, gateway_access_result_t *result)
@@ -79,6 +99,11 @@ static void parse_gateway_response(const char *body, gateway_access_result_t *re
     result->access_granted = parse_access_value(root);
     copy_json_string(root, "pickup_session_id", result->pickup_session_id, sizeof(result->pickup_session_id));
     copy_json_string(root, "display_text", result->display_text, sizeof(result->display_text));
+    copy_json_string(root, "status", result->status, sizeof(result->status));
+    copy_json_string(root, "reason", result->reason, sizeof(result->reason));
+    copy_json_string(root, "session_color", result->session_color, sizeof(result->session_color));
+    stringify_array(root, "shelves", result->shelves, sizeof(result->shelves));
+    stringify_array(root, "parcel_codes", result->parcel_codes, sizeof(result->parcel_codes));
     stringify_warnings(root, result->warnings, sizeof(result->warnings));
 
     cJSON *pickup_count = cJSON_GetObjectItemCaseSensitive(root, "pickup_count");
@@ -99,6 +124,45 @@ static void parse_gateway_response(const char *body, gateway_access_result_t *re
     }
 
     cJSON_Delete(root);
+}
+
+static esp_err_t gateway_get_json(const char *path, char *response, size_t response_size, int *http_status)
+{
+    esp_err_t err = network_client_http_get(SPS_GATEWAY_HOST, SPS_GATEWAY_PORT, path,
+                                             response, response_size, http_status);
+    if (err != ESP_OK) return err;
+    return (*http_status >= 200 && *http_status < 300) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t gateway_client_fetch_qr_session(gateway_qr_session_t *result)
+{
+    if (result == NULL) return ESP_ERR_INVALID_ARG;
+    memset(result, 0, sizeof(*result));
+    char response[SPS_HTTP_RESPONSE_MAX] = {0};
+    esp_err_t err = gateway_get_json(SPS_GATEWAY_QR_PATH, response, sizeof(response), &result->http_status);
+    if (err != ESP_OK) return err;
+    cJSON *root = cJSON_Parse(response);
+    if (root == NULL) return ESP_ERR_INVALID_RESPONSE;
+    copy_json_string(root, "session_id", result->session_id, sizeof(result->session_id));
+    copy_json_string(root, "qr_payload", result->qr_payload, sizeof(result->qr_payload));
+    result->request_ok = result->qr_payload[0] != '\0';
+    cJSON_Delete(root);
+    ESP_LOGI(TAG, "QR session received: session_id=%s payload_bytes=%u",
+             result->session_id, (unsigned)strlen(result->qr_payload));
+    return result->request_ok ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+esp_err_t gateway_client_poll_auth_result(gateway_access_result_t *result)
+{
+    if (result == NULL) return ESP_ERR_INVALID_ARG;
+    memset(result, 0, sizeof(*result));
+    result->pickup_count = -1;
+    char response[SPS_HTTP_RESPONSE_MAX] = {0};
+    esp_err_t err = gateway_get_json(SPS_GATEWAY_AUTH_PATH, response, sizeof(response), &result->http_status);
+    result->request_ok = err == ESP_OK;
+    if (err != ESP_OK) return err;
+    parse_gateway_response(response, result);
+    return ESP_OK;
 }
 
 esp_err_t gateway_client_post_access_card(const char *uid_hex, gateway_access_result_t *result)
