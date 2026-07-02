@@ -135,6 +135,7 @@ class Parcel(Base, TimestampMixin):
     receiver_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
     receiver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     receiver_name_masked: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    shelf_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     station_id: Mapped[int] = mapped_column(ForeignKey('stations.id'), nullable=False)
     status: Mapped[ParcelStatus] = mapped_column(Enum(ParcelStatus), default=ParcelStatus.CREATED, nullable=False)
     origin: Mapped[ParcelOrigin] = mapped_column(Enum(ParcelOrigin), default=ParcelOrigin.SERVER_MANUAL, nullable=False)

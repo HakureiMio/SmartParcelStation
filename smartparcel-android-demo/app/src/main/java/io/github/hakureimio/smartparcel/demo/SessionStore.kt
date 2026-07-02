@@ -51,6 +51,9 @@ class SessionStore(context: Context) {
         if (remember || auto) prefs.edit().putString("password", password).apply() else prefs.edit().remove("password").apply()
     }
 
+    fun savePreferredRole(role: String) =
+        prefs.edit().putString("preferred_role", role).apply()
+
     fun logout() = prefs.edit().remove("token").remove("user_id").remove("role").remove("display_name").remove("station_id").apply()
     fun clearCredentials() = prefs.edit().clear().apply()
 }

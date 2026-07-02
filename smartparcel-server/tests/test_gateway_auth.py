@@ -15,7 +15,7 @@ from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
-from app.core.security import generate_gateway_signature, raw_body_hash, validate_gateway_timestamp  # noqa: E402
+from app.core.security import create_access_token, generate_gateway_signature, raw_body_hash, validate_gateway_timestamp  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -172,6 +172,78 @@ def sync_push(items):
     path = f'/api/v1/gateways/{GATEWAY_CODE}/sync/push'
     headers, raw = signed_headers('POST', path, items)
     return client.post(path, headers=headers, content=raw)
+
+
+def test_gateway_inbound_persists_shelf_code_and_returns_it_to_user():
+    async def seed_user():
+        async with TestSessionLocal() as db:
+            db.add(
+                User(
+                    id=2,
+                    display_name='Parcel User',
+                    phone='18800000002',
+                    role=UserRole.USER,
+                    is_active=True,
+                )
+            )
+            await db.commit()
+
+    asyncio.run(seed_user())
+    item = {
+        'event_id': uuid.uuid4().hex,
+        'event_type': 'GATEWAY_INBOUND',
+        'payload_json': {
+            'parcel_code': 'P-SHELF-001',
+            'receiver_user_id': 2,
+            'station_id': 1,
+            'shelf_code': 'A03',
+        },
+    }
+    response = sync_push([item])
+    assert response.status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            parcel = (
+                await db.execute(select(Parcel).where(Parcel.parcel_code == 'P-SHELF-001'))
+            ).scalar_one()
+            assert parcel.shelf_code == 'A03'
+
+    asyncio.run(check_db())
+
+    token = create_access_token(user_id=2, role='client', station_id=None)
+    response = client.get(
+        '/api/v1/users/me/parcels',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]['parcel_code'] == 'P-SHELF-001'
+    assert items[0]['shelf_code'] == 'A03'
+    assert items[0]['status'] == 'WAITING_PICKUP'
+
+
+def test_gateway_inbound_accepts_legacy_shelf_alias():
+    item = {
+        'event_id': uuid.uuid4().hex,
+        'event_type': 'PARCEL_ARRIVED',
+        'payload_json': {
+            'parcel_code': 'P-SHELF-ALIAS',
+            'station_id': 1,
+            'shelf': 'B01',
+        },
+    }
+    assert sync_push([item]).status_code == 200
+
+    async def check_db():
+        async with TestSessionLocal() as db:
+            parcel = (
+                await db.execute(select(Parcel).where(Parcel.parcel_code == 'P-SHELF-ALIAS'))
+            ).scalar_one()
+            assert parcel.shelf_code == 'B01'
+
+    asyncio.run(check_db())
 
 
 def test_server_tag_management_routes_are_removed_from_openapi_and_return_404():

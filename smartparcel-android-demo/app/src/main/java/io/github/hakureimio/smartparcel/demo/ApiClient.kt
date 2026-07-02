@@ -1,5 +1,6 @@
 package io.github.hakureimio.smartparcel.demo
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,6 +15,17 @@ object ApiClient {
         val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (code !in 200..299) throw IllegalStateException("HTTP $code: $text")
         return if (text.isBlank()) "HTTP $code" else text
+    }
+    fun getJson(url: String, headers: Map<String, String> = emptyMap()) =
+        JSONObject(request("GET", url, headers))
+
+    fun requestJsonArray(url: String, headers: Map<String, String> = emptyMap()): JSONArray {
+        val text = request("GET", url, headers).trim()
+        if (text.startsWith("[")) return JSONArray(text)
+        val wrapped = JSONObject(text)
+        return wrapped.optJSONArray("items")
+            ?: wrapped.optJSONArray("data")
+            ?: throw IllegalStateException("响应中缺少包裹数组")
     }
     fun readerHeaders(c: Config) = mapOf("X-Gate-Reader-Id" to c.readerId, "X-Gate-Reader-Token" to c.readerToken)
     fun bearerHeaders(session: LoginSession?) = session?.token?.takeIf { it.isNotBlank() }?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap()

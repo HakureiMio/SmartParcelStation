@@ -132,7 +132,7 @@ POST /api/v1/gateways/heartbeat
 
 server 当前会处理：
 
-- `GATEWAY_INBOUND`：合并或创建中心包裹。
+- `GATEWAY_INBOUND`：合并或创建中心包裹，并将网关上报的 `shelf_code` 保存到中心数据库。为兼容旧来源，也接受 `shelf`、`location`、`rack_code` 字段。
 - `PICKUP_CONFIRMED` / `OFFLINE_PICKUP`：记录取件审计并更新包裹状态。
 - `TAG_EXCEPTION_REPORTED`：保存标签异常摘要并生成工作人员通知。
 - `NFC_ACCESS_GRANTED` / `NFC_ACCESS_DENIED` / `TAG_WAKE_STARTED`：保存门禁和唤醒审计。
@@ -159,6 +159,15 @@ python -m admin_console.main
 ```http
 POST /api/v1/auth/login
 ```
+
+当前用户的待取包裹接口：
+
+```http
+GET /api/v1/users/me/parcels
+Authorization: Bearer <token>
+```
+
+响应中的每个包裹包含 `parcel_code`、`status`、`shelf_code` 等字段。历史数据在迁移后若尚未收到网关重新上报，`shelf_code` 可能为 `null`。
 
 小程序已提供用户端和员工端原型。server 当前只提供部分真实 API，其余页面仍可能使用 mock fallback。
 

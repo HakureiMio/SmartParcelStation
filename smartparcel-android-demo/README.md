@@ -2,14 +2,16 @@
 
 独立的 Kotlin Android 原生演示端（包名 `io.github.hakureimio.smartparcel.demo`），用于验证 QR、NTAG213/NDEF、Deep Link、HCE APDU 和 Gateway 前台轮询。`minSdk 23`，不会修改仓库内其他工程。
 
-界面采用轻量 iOS 风格：浅灰背景、大标题、圆角卡片和系统蓝操作按钮。启动结构为：登录页 → 双入口主页 → 用户端/员工端功能菜单 → 具体工具页。原 QR、NFC、Deep Link、HCE、Gateway 和前台服务能力均保留。
+界面采用轻量 iOS 风格：浅灰背景、大标题、圆角卡片和系统蓝操作按钮。启动结构为：端选择页 → 对应端登录页 → 按账号角色进入用户端/员工端首页 → 具体工具页。登录后不会出现同时包含两端入口的主页。原 QR、NFC、Deep Link、HCE、Gateway 和前台服务能力均保留。
 
 ## 登录与自动登录
 
-登录调用现有 `POST /auth/login`，角色使用服务端兼容值 `client`（用户端）或 `staff`（员工端）。成功会保存 Bearer token、用户信息和角色；受保护的 QR/NFC/取件请求自动携带该 token，HTTP 401 会清除会话并回到登录页。
+登录调用现有 `POST /auth/login`。用户端登录请求固定使用 `client`，员工端登录请求固定使用 `staff`，登录页内不再切换角色。App 会校验服务端实际返回的角色；账号类型与入口不匹配时拒绝进入错误端并明确提示。成功会保存 Bearer token、用户信息和角色；受保护的包裹、QR/NFC/取件请求自动携带该 token，HTTP 401 会清除会话并回到端选择页。
+
+用户端“我的包裹 / 待取包裹”调用现有真实接口 `GET /users/me/parcels`，使用当前 Bearer token 获取当前账号的待取包裹。Android 兼容数组及 `items`/`data` 包装，并兼容常见包裹号、状态和货架字段别名。当前 Server 的 `Parcel` 模型尚无货架字段，因此服务端未返回货架时界面明确显示“未提供”，不会以假数据冒充成功。
 
 - “保存密码”将账号和密码写入 App 私有 SharedPreferences `login_state`；关闭时立即清除密码，并关闭自动登录。
-- “自动登录”会联动开启保存密码。下次启动时使用保存的账号、密码和角色重新请求 `/auth/login`，而不是盲目复用旧 token。
+- “自动登录”会联动开启保存密码。下次启动时使用保存的账号、密码和 `preferred_role` 重新请求 `/auth/login`，校验服务端角色后直接进入对应端首页，而不是盲目复用旧 token。
 - “退出登录”只移除当前 token/用户会话，可保留用户选择的账号密码；“清除本地登录信息”会清空整个 `login_state`。
 - Demo 当前使用普通 SharedPreferences，适合受控演示环境；生产版本应迁移到 Android Keystore 支持的加密凭据存储。
 
@@ -24,8 +26,8 @@
 
 ## 测试流程
 
-1. 安装并打开 App，在 Settings 确认 `gateway_base_url = http://10.150.10.140:19000`，保存。
-2. Home 点击“测试 Gateway Health”。Gate Service 页可启动/停止 8 秒间隔的前台轮询并查看 health、auth-result 和错误日志。
+1. 安装并打开 App，从员工端入口登录，在设置中确认 `gateway_base_url = http://10.150.10.140:19000`，保存。
+2. 员工端首页进入 Gate Service。该页可测试 Gateway Health，启动/停止 8 秒间隔的前台轮询并查看 health、auth-result 和错误日志。
 3. 向 NTAG213 写入 URI：`sps://gate-nfc?v=1&gateway_code=GW001&reader_id=GATE01&station_id=1&gate_nfc_tag_id=GATE-NFC-001`。可附加 Android Application Record，包名为 `io.github.hakureimio.smartparcel.demo`。
 4. App 关闭或打开时触碰标签，确认 App 被唤起、NDEF 被解析并自动提交门禁 NFC 认证。NFC Reader 页也支持 NDEF URI 和 Text；未检测到 NDEF、格式错误、不支持类型及 NFC 未开启均会明确提示。
 5. QR 页扫描 `sps://gate-qr?...`，确认七个参数被解析，然后提交。兼容现有小程序字段：`auth_method, gateway_code, reader_id, station_id, session_id, nonce, expires_at, signature`。
@@ -43,11 +45,13 @@ adb shell am start -a android.intent.action.VIEW -d "sps://gate-qr?v=1&gateway_c
 
 ### UI 验收步骤
 
-1. 首次启动选择“用户端”或“员工端”，输入真实测试账号；勾选保存密码和自动登录后登录。
-2. 确认主页显示“用户端”“员工端”两张大卡片，并可分别进入扫码/NFC，以及 Gateway/HCE/Service 页面。
-3. 从最近任务划掉 App 后重新打开；App 应重新调用登录接口并自动进入双入口主页。把密码改错或让账号失效后，应留在登录页并显示错误。
-4. 用户端 → 扫码开门 → 打开相机扫描。扫码 Activity 在 Manifest 和代码中均固定 `portrait`，预览、取景框和提示文字应保持标准竖屏方向。
-5. 连续扫描相同内容时，当前页面会拦截重复结果并提示“请勿重复扫描”。
+1. 启动后看到两个入口：“用户端登录”和“员工端登录”；进入后标题与入口一致，登录页内没有角色切换。
+2. 用户账号只能进入用户首页，员工账号只能进入员工首页；登录后不出现双端入口主页。
+3. 用户首页进入“我的包裹 / 待取包裹”，确认真实接口返回的每项显示包裹号、状态、货架；空列表显示“暂无待取包裹”，失败显示真实错误。
+4. 分别用员工账号走用户端入口、用户账号走员工端入口，确认明确提示账号类型不匹配并拒绝进入错误端。
+5. 勾选保存密码和自动登录，重启 App；App 应重新调用登录接口，并根据保存的 `preferred_role` 进入对应首页。密码错误或账号失效时应停留在对应登录页并显示错误。
+6. 用户端 → 扫码开门 → 打开相机扫描。扫码 Activity 在 Manifest 和代码中均固定 `portrait`，预览、取景框和提示文字应保持标准竖屏方向。
+7. 连续扫描相同内容时，当前页面会拦截重复结果并提示“请勿重复扫描”。
 
 ## HCE / APDU
 

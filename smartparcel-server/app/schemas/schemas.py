@@ -182,6 +182,7 @@ class ParcelCreate(BaseModel):
     receiver_user_id: int | None = None
     receiver_phone: str | None = None
     receiver_name_masked: str | None = None
+    shelf_code: str | None = None
     station_id: int
     status: ParcelStatus = ParcelStatus.PRE_REGISTERED
     origin: ParcelOrigin = ParcelOrigin.SERVER_MANUAL
@@ -207,6 +208,7 @@ class ParcelOut(ORMBase):
     receiver_user_id: int | None
     receiver_phone: str | None
     receiver_name_masked: str | None
+    shelf_code: str | None
     station_id: int
     status: ParcelStatus
     origin: ParcelOrigin
@@ -223,6 +225,7 @@ class ParcelQueryOut(BaseModel):
     receiver_user_id: int | None
     receiver_phone_masked: str | None
     receiver_name_masked: str | None
+    shelf_code: str | None
     station_id: int
     status: ParcelStatus
     origin: ParcelOrigin

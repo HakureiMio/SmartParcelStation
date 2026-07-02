@@ -972,6 +972,7 @@ async def query_parcels(
             'receiver_user_id': parcel.receiver_user_id,
             'receiver_phone_masked': mask_phone(parcel.receiver_phone),
             'receiver_name_masked': parcel.receiver_name_masked,
+            'shelf_code': parcel.shelf_code,
             'station_id': parcel.station_id,
             'status': parcel.status,
             'origin': parcel.origin,
@@ -1045,6 +1046,14 @@ async def apply_gateway_inbound(db: AsyncSession, station_id: int, payload: dict
     parcel_code = payload.get('parcel_code')
     if not parcel_code:
         raise HTTPException(status_code=400, detail='parcel_code is required for inbound event')
+    shelf_code = next(
+        (
+            str(payload[key]).strip()
+            for key in ('shelf_code', 'shelf', 'location', 'rack_code')
+            if payload.get(key) is not None and str(payload[key]).strip()
+        ),
+        None,
+    )
     result = await db.execute(select(Parcel).where(Parcel.parcel_code == parcel_code))
     parcel = result.scalar_one_or_none()
     if parcel:
@@ -1052,6 +1061,7 @@ async def apply_gateway_inbound(db: AsyncSession, station_id: int, payload: dict
         parcel.receiver_user_id = optional_int(payload.get('receiver_user_id')) or parcel.receiver_user_id
         parcel.receiver_phone = payload.get('receiver_phone') or parcel.receiver_phone
         parcel.receiver_name_masked = payload.get('receiver_name_masked') or parcel.receiver_name_masked
+        parcel.shelf_code = shelf_code or parcel.shelf_code
         parcel.station_id = int(payload.get('station_id') or station_id)
         parcel.status = ParcelStatus.WAITING_PICKUP
         parcel.sync_status = ParcelSyncStatus.MERGED
@@ -1062,6 +1072,7 @@ async def apply_gateway_inbound(db: AsyncSession, station_id: int, payload: dict
             receiver_user_id=optional_int(payload.get('receiver_user_id')),
             receiver_phone=payload.get('receiver_phone'),
             receiver_name_masked=payload.get('receiver_name_masked'),
+            shelf_code=shelf_code,
             station_id=int(payload.get('station_id') or station_id),
             status=ParcelStatus.WAITING_PICKUP,
             origin=ParcelOrigin.GATEWAY_INBOUND,
