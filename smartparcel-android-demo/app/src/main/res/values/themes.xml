@@ -1,1 +1,6 @@
-<resources><style name="Theme.SmartParcel" parent="Theme.MaterialComponents.DayNight.NoActionBar"><item name="colorPrimary">#2457C5</item><item name="colorPrimaryVariant">#153A91</item><item name="colorOnPrimary">#FFFFFF</item></style></resources>
+<resources>
+    <style name="Theme.SmartParcel" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">true</item><item name="android:statusBarColor">#F5F5F7</item><item name="android:navigationBarColor">#F5F5F7</item><item name="colorPrimary">#007AFF</item><item name="colorPrimaryVariant">#0064D1</item><item name="colorOnPrimary">#FFFFFF</item>
+    </style>
+    <style name="Theme.SmartParcel.Scanner" parent="Theme.MaterialComponents.DayNight.NoActionBar"><item name="android:windowActionModeOverlay">true</item><item name="colorAccent">#007AFF</item></style>
+</resources>

@@ -16,6 +16,7 @@ object ApiClient {
         return if (text.isBlank()) "HTTP $code" else text
     }
     fun readerHeaders(c: Config) = mapOf("X-Gate-Reader-Id" to c.readerId, "X-Gate-Reader-Token" to c.readerToken)
+    fun bearerHeaders(session: LoginSession?) = session?.token?.takeIf { it.isNotBlank() }?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap()
     fun authJson(p: SpsPayload): JSONObject = JSONObject().apply {
         p.values.forEach { (k,v) -> put(k, if (k == "station_id" || k == "expires_at") v.toLongOrNull() ?: v else v) }
         put("auth_method", if (p.type == SpsPayload.Type.GATE_QR) "GATE_QR" else "GATE_NFC_TAG")

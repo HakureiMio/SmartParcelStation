@@ -9,10 +9,11 @@
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application android:allowBackup="true" android:label="@string/app_name" android:theme="@style/Theme.SmartParcel" android:usesCleartextTraffic="true">
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".AppActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="sps" android:host="gate-nfc"/><data android:scheme="sps" android:host="gate-qr"/><data android:scheme="sps" android:host="pickup"/></intent-filter>
         </activity>
+        <activity android:name=".PortraitCaptureActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/Theme.SmartParcel.Scanner" />
         <service android:name=".SmartParcelHostApduService" android:exported="true" android:permission="android.permission.BIND_NFC_SERVICE"><intent-filter><action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE"/></intent-filter><meta-data android:name="android.nfc.cardemulation.host_apdu_service" android:resource="@xml/apduservice"/></service>
         <service android:name=".GateForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>

@@ -2,6 +2,17 @@
 
 独立的 Kotlin Android 原生演示端（包名 `io.github.hakureimio.smartparcel.demo`），用于验证 QR、NTAG213/NDEF、Deep Link、HCE APDU 和 Gateway 前台轮询。`minSdk 23`，不会修改仓库内其他工程。
 
+界面采用轻量 iOS 风格：浅灰背景、大标题、圆角卡片和系统蓝操作按钮。启动结构为：登录页 → 双入口主页 → 用户端/员工端功能菜单 → 具体工具页。原 QR、NFC、Deep Link、HCE、Gateway 和前台服务能力均保留。
+
+## 登录与自动登录
+
+登录调用现有 `POST /auth/login`，角色使用服务端兼容值 `client`（用户端）或 `staff`（员工端）。成功会保存 Bearer token、用户信息和角色；受保护的 QR/NFC/取件请求自动携带该 token，HTTP 401 会清除会话并回到登录页。
+
+- “保存密码”将账号和密码写入 App 私有 SharedPreferences `login_state`；关闭时立即清除密码，并关闭自动登录。
+- “自动登录”会联动开启保存密码。下次启动时使用保存的账号、密码和角色重新请求 `/auth/login`，而不是盲目复用旧 token。
+- “退出登录”只移除当前 token/用户会话，可保留用户选择的账号密码；“清除本地登录信息”会清空整个 `login_state`。
+- Demo 当前使用普通 SharedPreferences，适合受控演示环境；生产版本应迁移到 Android Keystore 支持的加密凭据存储。
+
 ## 导入、构建与安装
 
 1. 用 Android Studio（JDK 17）打开本目录 `smartparcel-android-demo`，等待 Gradle Sync。
@@ -29,6 +40,14 @@ adb shell am start -a android.intent.action.VIEW -d "sps://gate-qr?v=1&gateway_c
 ```
 
 `sps://` 适合 Demo 和已安装 App 的环境，不依赖微信 URL Link 权限。正式 HTTPS App Links 需要真实域名、HTTPS intent-filter 及域名下的 `.well-known/assetlinks.json`，本 Demo 不强依赖占位域名。
+
+### UI 验收步骤
+
+1. 首次启动选择“用户端”或“员工端”，输入真实测试账号；勾选保存密码和自动登录后登录。
+2. 确认主页显示“用户端”“员工端”两张大卡片，并可分别进入扫码/NFC，以及 Gateway/HCE/Service 页面。
+3. 从最近任务划掉 App 后重新打开；App 应重新调用登录接口并自动进入双入口主页。把密码改错或让账号失效后，应留在登录页并显示错误。
+4. 用户端 → 扫码开门 → 打开相机扫描。扫码 Activity 在 Manifest 和代码中均固定 `portrait`，预览、取景框和提示文字应保持标准竖屏方向。
+5. 连续扫描相同内容时，当前页面会拦截重复结果并提示“请勿重复扫描”。
 
 ## HCE / APDU
 

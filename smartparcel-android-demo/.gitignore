@@ -1,6 +1,8 @@
 /.gradle/
 /.gradle-user/
+/.gradle-user-95/
 /.wrapper-merge/
+/.tooling/
 /settings.gradle.kts
 /build.gradle.kts
 /app/build.gradle.kts
