@@ -14,8 +14,8 @@
 
 [Unit]
 Description=SmartParcel Local Gateway
-After=network.target NetworkManager.service bluetooth.service
-Wants=network.target NetworkManager.service bluetooth.service
+After=network-online.target NetworkManager.service bluetooth.service
+Wants=network-online.target NetworkManager.service bluetooth.service
 
 [Service]
 Type=simple
@@ -24,8 +24,9 @@ Group=smartparcel
 WorkingDirectory=/opt/smartparcel-gateway
 Environment=PATH=/opt/smartparcel-gateway/.venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/smartparcel-gateway/.venv/bin/python -m gateway.main run
-Restart=on-failure
+Restart=always
 RestartSec=10
+TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
 

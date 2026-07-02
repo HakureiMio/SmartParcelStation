@@ -37,7 +37,22 @@ curl -i -X POST "http://127.0.0.1:18000/api/v1/dev/default-users" -H "X-Admin-Bo
 curl -i -X POST "http://127.0.0.1:18000/api/v1/dev/demo-data" -H "X-Admin-Bootstrap-Token: ${ADMIN_BOOTSTRAP_TOKEN}"
 ```
 
-Demo data 包含 `demo_user001`、`CARD_UID_001`、A03/B01 上两个 `WAITING_PICKUP` 包裹、`SPS-TAG-0001/0002`、`GW001`、`GATE01` 和 `GATE-NFC-001`。
+Demo data 包含 `demo_user001`、`CARD_UID_001`、`SPS-TAG-0001/0002`、`GW001`、`GATE01` 和 `GATE-NFC-001`。两个 `WAITING_PICKUP` 包裹的确定性货架为：`DEMO-PARCEL-0001 → A03`、`DEMO-PARCEL-0002 → B01`。
+
+Server 主表 `parcels.shelf_code` 是 Android/用户端包裹查询的货架来源；server→gateway 的 `PARCEL_UPSERT` 同时携带 `shelf_code` 和兼容字段 `shelf`，供 gateway 本地门禁显示使用。如果历史线上数据的 `shelf_code` 为空，在 server 容器内运行：
+
+```bash
+python scripts/fix_demo_parcel_shelf_code.py
+```
+
+也可用以下 SQL 只补空值：
+
+```sql
+UPDATE parcels SET shelf_code = 'A03'
+WHERE parcel_code = 'DEMO-PARCEL-0001' AND (shelf_code IS NULL OR shelf_code = '');
+UPDATE parcels SET shelf_code = 'B01'
+WHERE parcel_code = 'DEMO-PARCEL-0002' AND (shelf_code IS NULL OR shelf_code = '');
+```
 
 登录并保存响应 token：
 

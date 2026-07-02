@@ -167,7 +167,20 @@ GET /api/v1/users/me/parcels
 Authorization: Bearer <token>
 ```
 
-响应中的每个包裹包含 `parcel_code`、`status`、`shelf_code` 等字段。历史数据在迁移后若尚未收到网关重新上报，`shelf_code` 可能为 `null`。
+响应中的每个包裹包含 `parcel_code`、`status`、`shelf_code` 等字段。server 主表 `parcels.shelf_code` 是用户端查询显示货架的来源；gateway 同步事件中的 `shelf_code`（以及兼容字段 `shelf`）是门禁本地显示的来源。
+
+Demo 包裹的确定性货架为：
+
+- `DEMO-PARCEL-0001`：`A03`
+- `DEMO-PARCEL-0002`：`B01`
+
+`ensure_demo_data()` 会在创建或再次初始化时补齐这两个值，并重新排队 `PARCEL_UPSERT`。如果线上历史数据已经出现 `shelf_code=NULL`，升级并完成 `0009_parcel_shelf_code` 迁移后，在 server 容器内执行：
+
+```bash
+python scripts/fix_demo_parcel_shelf_code.py
+```
+
+该脚本可重复执行，只会把上述两个 demo 包裹的空货架补为 A03/B01，不覆盖已有非空值。
 
 小程序已提供用户端和员工端原型。server 当前只提供部分真实 API，其余页面仍可能使用 mock fallback。
 

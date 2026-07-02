@@ -388,18 +388,28 @@ async def ensure_demo_data(db: AsyncSession) -> dict:
     for index, shelf in enumerate(('A03', 'B01'), start=1):
         code = f'DEMO-PARCEL-{index:04d}'
         parcel = (await db.execute(select(Parcel).where(Parcel.parcel_code == code))).scalar_one_or_none()
+        parcel_changed = False
         if not parcel:
             parcel = Parcel(
                 parcel_code=code, pickup_code=f'10000{index}', receiver_user_id=demo_user.id,
                 receiver_phone=demo_user.phone, receiver_name_masked=demo_user.display_name,
+                shelf_code=shelf,
                 station_id=1, status=ParcelStatus.WAITING_PICKUP, origin=ParcelOrigin.SERVER_MANUAL,
                 sync_status=ParcelSyncStatus.SYNC_PENDING, created_by_admin_id=staff.id,
             )
             db.add(parcel)
             await db.flush()
+            parcel_changed = True
+        elif parcel.shelf_code != shelf:
+            parcel.shelf_code = shelf
+            parcel.sync_status = ParcelSyncStatus.SYNC_PENDING
+            parcel_changed = True
+
+        if parcel_changed:
             await _queue_station_event(db, 1, GatewaySyncEventType.PARCEL_UPSERT, {
                 'parcel_id': parcel.id, 'parcel_code': code, 'user_id': str(demo_user.id),
-                'station_id': '1', 'shelf': shelf, 'status': ParcelStatus.WAITING_PICKUP.value,
+                'station_id': '1', 'shelf_code': shelf, 'shelf': shelf,
+                'status': ParcelStatus.WAITING_PICKUP.value,
                 'tag_id': f'SPS-TAG-{index:04d}',
             })
         tag_value = f'SPS-TAG-{index:04d}'
@@ -419,7 +429,8 @@ async def ensure_demo_data(db: AsyncSession) -> dict:
             ))
             await _queue_station_event(db, 1, GatewaySyncEventType.PARCEL_TAG_BINDING_UPSERT, {
                 'parcel_id': parcel.id, 'tag_id': tag_value, 'pickup_binding_id': binding_value,
-                'station_id': '1', 'shelf': shelf, 'status': ParcelTagBindingStatus.ACTIVE.value,
+                'station_id': '1', 'shelf_code': shelf, 'shelf': shelf,
+                'status': ParcelTagBindingStatus.ACTIVE.value,
             })
         parcel_ids.append(parcel.id)
     await db.commit()

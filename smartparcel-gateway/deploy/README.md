@@ -36,6 +36,14 @@ sudo systemctl start smartparcel-gateway
 sudo journalctl -u smartparcel-gateway -f
 ```
 
+`enable` 会让 systemd 在设备断电后下次开机自动启动 Gateway；服务运行命令为完整的 `python -m gateway.main run`，包含 heartbeat、local API 和同步循环。验证：
+
+```bash
+sudo systemctl is-enabled smartparcel-gateway
+sudo systemctl status smartparcel-gateway --no-pager
+sudo journalctl -u smartparcel-gateway -b --no-pager -n 100
+```
+
 ## Files
 
 | File | Purpose |

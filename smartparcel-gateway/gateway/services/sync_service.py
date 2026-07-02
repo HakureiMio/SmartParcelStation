@@ -55,6 +55,7 @@ class SyncService:
                     receiver_user_id=p.get("receiver_user_id"),
                     receiver_phone=p.get("receiver_phone"),
                     receiver_name_masked=p.get("receiver_name_masked"),
+                    shelf_code=p.get("shelf_code") or p.get("shelf"),
                     station_id=p.get("station_id", self.station_id),
                     status=p.get("status", "CREATED"),
                     origin=p.get("origin", "SERVER_MANUAL"),
@@ -67,6 +68,9 @@ class SyncService:
                 obj.receiver_user_id = p.get("receiver_user_id")
                 obj.receiver_phone = p.get("receiver_phone")
                 obj.receiver_name_masked = p.get("receiver_name_masked")
+                incoming_shelf = p.get("shelf_code") or p.get("shelf")
+                if incoming_shelf is not None:
+                    obj.shelf_code = incoming_shelf
                 obj.origin = p.get("origin", obj.origin)
                 obj.sync_status = p.get("sync_status", obj.sync_status)
                 obj.local_updated_at = datetime.utcnow()
@@ -125,8 +129,13 @@ class SyncService:
             if row is None:
                 row = LocalParcel(server_parcel_id=parcel_id, parcel_code=payload["parcel_code"], station_id=str(payload.get("station_id", self.station_id)))
                 self.db.add(row)
-            for source, target in (("pickup_code", "pickup_code"), ("receiver_user_id", "receiver_user_id"), ("user_id", "receiver_user_id"), ("receiver_phone", "receiver_phone"), ("receiver_name_masked", "receiver_name_masked"), ("shelf_code", "shelf_code"), ("shelf", "shelf_code")):
+            for source, target in (("pickup_code", "pickup_code"), ("receiver_user_id", "receiver_user_id"), ("user_id", "receiver_user_id"), ("receiver_phone", "receiver_phone"), ("receiver_name_masked", "receiver_name_masked")):
                 if payload.get(source) is not None: setattr(row, target, str(payload[source]))
+            incoming_shelf = payload.get("shelf_code")
+            if incoming_shelf is None:
+                incoming_shelf = payload.get("shelf")
+            if incoming_shelf is not None:
+                row.shelf_code = str(incoming_shelf)
             row.status = payload.get("status", row.status); row.local_updated_at = now
             return
         if kind == "PARCEL_TAG_BINDING_UPSERT":
